@@ -254,6 +254,7 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_delaunayTriangulation, 0, 0, 0)
     ZEND_ARG_INFO(0, tolerance)
     ZEND_ARG_INFO(0, edgeonly)
+    ZEND_ARG_INFO(0, constrained)
 ZEND_END_ARG_INFO()
 #endif
 
@@ -596,4 +597,47 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createRectangle, 0, 0, 4)
     ZEND_ARG_INFO(0, xmax)
     ZEND_ARG_INFO(0, ymax)
 ZEND_END_ARG_INFO()
+
+
+/* -- Item 13: Coverage processing ---------------- */
+
+#define arginfo_Geometry_coverageUnion       arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageIsValid, 0, 0, 0)
+    ZEND_ARG_INFO(0, gapWidth)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageSimplifyVW, 0, 0, 1)
+    ZEND_ARG_INFO(0, tolerance)
+    ZEND_ARG_INFO(0, simplifyBoundary)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageClean, 0, 0, 0)
+    ZEND_ARG_INFO(0, params)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 14: Clustering family ------------------ */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterDBSCAN, 0, 0, 2)
+    ZEND_ARG_INFO(0, eps)
+    ZEND_ARG_INFO(0, minPoints)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterByDistance, 0, 0, 1)
+    ZEND_ARG_INFO(0, distance)
+    ZEND_ARG_INFO(0, useEnvelope)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterByIntersection, 0, 0, 0)
+    ZEND_ARG_INFO(0, useEnvelope)
+ZEND_END_ARG_INFO()
+
+/* GEOSClusterResult methods arginfo */
+
+#define arginfo_ClusterResult_construct             arginfo_void
+#define arginfo_ClusterResult_getNumClusters        arginfo_void
+#define arginfo_ClusterResult_getClusterSize        arginfo_num
+#define arginfo_ClusterResult_getClustersForInputs  arginfo_void
+#define arginfo_ClusterResult_getInputsForCluster   arginfo_num
 
