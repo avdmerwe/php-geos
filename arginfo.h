@@ -641,3 +641,31 @@ ZEND_END_ARG_INFO()
 #define arginfo_ClusterResult_getClustersForInputs  arginfo_void
 #define arginfo_ClusterResult_getInputsForCluster   arginfo_num
 
+
+/* -- Item 17: STRtree spatial index -------------- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_construct, 0, 0, 0)
+    ZEND_ARG_INFO(0, nodeCapacity)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_insert, 0, 0, 2)
+    ZEND_ARG_INFO(0, env)
+    ZEND_ARG_INFO(0, payload)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_remove, 0, 0, 2)
+    ZEND_ARG_INFO(0, env)
+    ZEND_ARG_INFO(0, payload)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_query, 0, 0, 1)
+    ZEND_ARG_INFO(0, env)
+    ZEND_ARG_INFO(0, cb)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_iterate, 0, 0, 1)
+    ZEND_ARG_INFO(0, cb)
+ZEND_END_ARG_INFO()
+
+#define arginfo_STRtree_nearest                  arginfo_geom
+

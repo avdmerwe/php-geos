@@ -747,6 +747,8 @@ static zend_class_entry *Geometry_ce_ptr;
 static zend_class_entry *CoordSeq_ce_ptr;
 /* forward declared for use by Geometry::cluster*; class defined below. */
 static zend_class_entry *ClusterResult_ce_ptr;
+/* forward declared for use by Geometry::* (none yet); class defined below. */
+static zend_class_entry *STRtree_ce_ptr;
 
 static zend_object_handlers Geometry_object_handlers;
 
@@ -6431,6 +6433,615 @@ PHP_METHOD(ClusterResult, getInputsForCluster)
     /* idxs is owned by the GEOSClusterInfo; do NOT free. */
 }
 
+/* -- Item 17: GEOSSTRtree spatial index -------------------- */
+
+/*
+ * Lifecycle / ownership invariants
+ * ================================
+ *
+ * GEOSSTRtree (the upstream C type) stores opaque void* "items" attached to
+ * envelope geometries. The tree itself does not own those items — it never
+ * frees them. We must therefore:
+ *
+ *   1. Allocate a "box" for every PHP payload zval before handing the box's
+ *      address to the C tree as the item pointer. The box is an emalloc'd
+ *      zval whose value is a copy (with refcount bumped) of the user's
+ *      payload. We hand the C tree the BOX POINTER, not the zval value.
+ *
+ *   2. Track every live box in a per-tree HashTable keyed by box pointer
+ *      (HashTable values are dummy nulls — we only need set membership).
+ *      This lets us:
+ *        - On dtor (or explicit removeAll): walk every box, refcount-down
+ *          its zval value, efree the box.
+ *        - On remove(env, payload): find the matching box (by zval-equality
+ *          to the payload), pass that pointer to GEOSSTRtree_remove_r,
+ *          then free the box if remove succeeded.
+ *
+ *   3. The GEOSGeometry envelope passed to insert/remove is borrowed only
+ *      for the duration of the C call — GEOS copies the bbox into the tree
+ *      node. We do NOT need to retain a refcount on the env geometry, and
+ *      it is the user's responsibility (via PHP's normal refcount) to keep
+ *      it alive only across the call.
+ *
+ *   4. STRtree is BUILD-ONCE. After the first query/iterate, GEOSSTRtree_r
+ *      builds the internal node hierarchy and treats the tree as read-only.
+ *      Inserts after build are silently ignored by upstream (we surface a
+ *      thrown exception). Removes after build are likewise unsupported by
+ *      upstream's STRtree implementation but the C function still returns
+ *      a status — we simply forward the status to the caller.
+ *
+ *   5. Sticky-error: PHP exceptions thrown from a user callback cannot
+ *      abort GEOS's iteration mid-way. We capture the first exception in
+ *      the callback context and short-circuit subsequent invocations
+ *      (early-return without calling the user's function). After the C
+ *      iteration completes, the PHP method re-throws the captured zval.
+ */
+
+typedef struct {
+    GEOSSTRtree *tree;
+    HashTable *boxes;     /* set of live STRtreeBox* pointers (key = pointer
+                             cast to ulong; bucket value is a dummy null) */
+    int built;            /* observational: set when query/iterate first
+                             called. Inserts / removes after this point are
+                             rejected with an exception. */
+} STRtreeRelay;
+
+/* A box: holds the user payload zval AND a cloned envelope geometry.
+ * The cloned env is used by nearest_generic_r's distance callback (which
+ * receives the box pointers as items and needs a way to compute distance
+ * to the user's probe). The clone owns its own GEOSGeometry, freed in the
+ * dtor — independent of the user's original env zval lifetime. */
+typedef struct {
+    zval payload;
+    GEOSGeometry *env;    /* cloned envelope (owned) */
+} STRtreeBox;
+
+static STRtreeBox *
+strtree_box_create(zval *src, const GEOSGeometry *env)
+{
+    STRtreeBox *b = (STRtreeBox*)emalloc(sizeof(STRtreeBox));
+    ZVAL_COPY(&b->payload, src); /* refcount-bump for ref types, copy for scalars */
+    /* Clone the env so the box owns its own copy. The user's original env
+     * zval is borrowed only across the call. */
+    b->env = GEOSGeom_clone_r(GEOS_G(handle), env);
+    return b;
+}
+
+static void
+strtree_box_free(STRtreeBox *b)
+{
+    if ( ! b ) return;
+    zval_ptr_dtor(&b->payload);
+    if (b->env) {
+        GEOSGeom_destroy_r(GEOS_G(handle), b->env);
+    }
+    efree(b);
+}
+
+/* Track a box in the relay's set. We hash on the pointer's bit pattern. */
+static void
+strtree_box_track(STRtreeRelay *r, STRtreeBox *b)
+{
+    zval dummy;
+    ZVAL_NULL(&dummy);
+    /* Use index_update with the pointer cast as an integer key for a stable
+     * keyed entry. zend_hash_index_update returns the bucket value zval*. */
+    zend_hash_index_update(r->boxes, (zend_ulong)(uintptr_t)b, &dummy);
+}
+
+static int
+strtree_box_untrack(STRtreeRelay *r, STRtreeBox *b)
+{
+    return zend_hash_index_del(r->boxes, (zend_ulong)(uintptr_t)b) == SUCCESS
+        ? 1 : 0;
+}
+
+static STRtreeRelay *
+strtree_relay_new(GEOSSTRtree *tree)
+{
+    STRtreeRelay *r = (STRtreeRelay*)emalloc(sizeof(STRtreeRelay));
+    r->tree = tree;
+    r->built = 0;
+    ALLOC_HASHTABLE(r->boxes);
+    /* dtor for the bucket value (the dummy null zval): standard zval dtor. */
+    zend_hash_init(r->boxes, 8, NULL, ZVAL_PTR_DTOR, 0);
+    return r;
+}
+
+/* Free every box still in the set, then destroy the hash. */
+static void
+strtree_relay_free_boxes(STRtreeRelay *r)
+{
+    zend_ulong h;
+    zend_string *k;
+    zval *v;
+
+    if ( ! r->boxes ) return;
+
+    ZEND_HASH_FOREACH_KEY_VAL(r->boxes, h, k, v) {
+        (void)k; (void)v;
+        strtree_box_free((STRtreeBox*)(uintptr_t)h);
+    } ZEND_HASH_FOREACH_END();
+
+    zend_hash_destroy(r->boxes);
+    FREE_HASHTABLE(r->boxes);
+    r->boxes = NULL;
+}
+
+/* -- Trampoline / callback context --------------------------- */
+
+typedef struct {
+    /* User's PHP callable (uninitialised in collect-mode). */
+    zval cb;
+    int has_cb;
+
+    /* For GEOSSTRtree_query_r in collect-mode: append payload values here. */
+    zval *result_array;
+    int collect_mode;
+
+    /* Sticky-error: if user callback throws, we copy the exception object
+     * into 'exception' and short-circuit subsequent invocations. */
+    zval exception;
+    int has_exception;
+} STRtreeCallbackCtx;
+
+static void
+strtree_capture_exception(STRtreeCallbackCtx *ctx)
+{
+    if (ctx->has_exception) return;
+    if (EG(exception)) {
+        /* Move ownership of the exception object out of EG(exception) into
+         * ctx->exception so iteration can complete without GEOS observing
+         * the exception state. We re-throw at the PHP boundary. */
+        ZVAL_OBJ(&ctx->exception, EG(exception));
+        EG(exception) = NULL;
+        ctx->has_exception = 1;
+    }
+}
+
+static void
+STRtree_trampoline(void *item, void *userdata)
+{
+    STRtreeCallbackCtx *ctx = (STRtreeCallbackCtx*)userdata;
+    STRtreeBox *box = (STRtreeBox*)item;
+    zval retval;
+
+    /* Sticky-error: if a previous invocation's callback threw, do nothing.
+     * GEOS will keep calling us until iteration completes; we just no-op. */
+    if (ctx->has_exception) return;
+
+    /* Defensive: a NULL item should never happen if the caller used the
+     * insert() path. But if it does, treat as no-op rather than crash. */
+    if ( ! box ) return;
+
+    if (ctx->collect_mode) {
+        /* Append a copy of the box's payload to the result array. */
+        zval tmp;
+        ZVAL_COPY(&tmp, &box->payload); /* bump refcount of payload value */
+        add_next_index_zval(ctx->result_array, &tmp);
+        return;
+    }
+
+    if ( ! ctx->has_cb ) return;
+
+    {
+        zend_fcall_info fci;
+        zend_fcall_info_cache fcc;
+        zval params[1];
+        char *err = NULL;
+
+        memset(&fci, 0, sizeof(fci));
+        memset(&fcc, 0, sizeof(fcc));
+
+        if (zend_fcall_info_init(&ctx->cb, 0, &fci, &fcc, NULL, &err)
+                != SUCCESS) {
+            /* Bad callable. Throw and short-circuit. */
+            zend_throw_exception_ex(zend_exception_get_default(),
+                1, "STRtree: callback is not callable: %s",
+                err ? err : "unknown");
+            if (err) efree(err);
+            strtree_capture_exception(ctx);
+            return;
+        }
+        if (err) efree(err);
+
+        ZVAL_COPY(&params[0], &box->payload); /* refcount-up the payload */
+        fci.param_count = 1;
+        fci.params = params;
+        fci.retval = &retval;
+        ZVAL_UNDEF(&retval);
+
+        if (zend_call_function(&fci, &fcc) == SUCCESS) {
+            zval_ptr_dtor(&retval);
+        }
+        zval_ptr_dtor(&params[0]);
+
+        strtree_capture_exception(ctx);
+    }
+}
+
+/* If a callback threw, re-throw at the PHP boundary. Returns 1 if it threw. */
+static int
+strtree_propagate_exception(STRtreeCallbackCtx *ctx)
+{
+    if ( ! ctx->has_exception) return 0;
+    /* Restore the captured exception into EG(exception). The PHP engine
+     * will then unwind back to userland on RETURN. */
+    zend_throw_exception_object(&ctx->exception);
+    ZVAL_UNDEF(&ctx->exception);
+    ctx->has_exception = 0;
+    return 1;
+}
+
+/* Find a tracked box whose zval value equals 'needle' under our chosen
+ * semantic: identity for objects (same zend_object pointer), strict-equal
+ * for everything else (matches PHP === for scalars/arrays). Returns the
+ * matching box pointer, or NULL if not found. */
+static STRtreeBox *
+strtree_find_box_for(STRtreeRelay *r, zval *needle)
+{
+    zend_ulong h;
+    zend_string *k;
+    zval *v;
+
+    if ( ! r->boxes ) return NULL;
+
+    ZEND_HASH_FOREACH_KEY_VAL(r->boxes, h, k, v) {
+        STRtreeBox *b = (STRtreeBox*)(uintptr_t)h;
+        (void)k; (void)v;
+
+        if (Z_TYPE(b->payload) == IS_OBJECT && Z_TYPE_P(needle) == IS_OBJECT) {
+            if (Z_OBJ(b->payload) == Z_OBJ_P(needle)) return b;
+            continue;
+        }
+        if (zend_is_identical(&b->payload, needle)) return b;
+    } ZEND_HASH_FOREACH_END();
+
+    return NULL;
+}
+
+/* -- PHP method declarations -------------------------------- */
+
+PHP_METHOD(STRtree, __construct);
+PHP_METHOD(STRtree, insert);
+PHP_METHOD(STRtree, remove);
+PHP_METHOD(STRtree, query);
+PHP_METHOD(STRtree, iterate);
+PHP_METHOD(STRtree, nearest);
+
+static zend_function_entry STRtree_methods[] = {
+    PHP_ME(STRtree, __construct, arginfo_STRtree_construct, 0)
+    PHP_ME(STRtree, insert,      arginfo_STRtree_insert,      0)
+    PHP_ME(STRtree, remove,      arginfo_STRtree_remove,      0)
+    PHP_ME(STRtree, query,       arginfo_STRtree_query,       0)
+    PHP_ME(STRtree, iterate,     arginfo_STRtree_iterate,     0)
+    PHP_ME(STRtree, nearest,     arginfo_STRtree_nearest,     0)
+    {NULL, NULL, NULL}
+};
+
+static zend_object_handlers STRtree_object_handlers;
+
+static void
+STRtree_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
+{
+#if PHP_VERSION_ID < 70000
+    Proxy *obj = (Proxy *)object;
+#else
+    Proxy *obj = php_geos_fetch_object(object);
+#endif
+
+    STRtreeRelay *r = (STRtreeRelay*)obj->relay;
+    if (r) {
+        /* IMPORTANT order:
+         *   1. Free every payload box (drops refcounts on user payloads).
+         *   2. Destroy the GEOS tree (which carries dangling box pointers
+         *      after step 1, but never dereferences them on destroy). */
+        strtree_relay_free_boxes(r);
+        if (r->tree) {
+            GEOSSTRtree_destroy_r(GEOS_G(handle), r->tree);
+        }
+        efree(r);
+    }
+
+#if PHP_VERSION_ID < 70000
+    zend_hash_destroy(obj->std.properties);
+    FREE_HASHTABLE(obj->std.properties);
+
+    efree(obj);
+#endif
+}
+
+static zend_object_value
+STRtree_create_obj (zend_class_entry *type TSRMLS_DC)
+{
+    return Gen_create_obj(type, STRtree_dtor, &STRtree_object_handlers);
+}
+
+PHP_METHOD(STRtree, __construct)
+{
+    GEOSSTRtree *tree;
+    STRtreeRelay *r;
+    zval *object = getThis();
+    zend_long nodeCapacity = 10;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|l",
+            &nodeCapacity) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (nodeCapacity < 2) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSSTRtree: nodeCapacity must be >= 2 (got %ld)",
+            (long)nodeCapacity);
+        RETURN_NULL();
+    }
+
+    tree = GEOSSTRtree_create_r(GEOS_G(handle), (size_t)nodeCapacity);
+    if ( ! tree ) {
+        /* errorHandler will already have thrown; safety net. */
+        if ( ! EG(exception)) {
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC, "GEOSSTRtree_create() failed");
+        }
+        RETURN_NULL();
+    }
+
+    r = strtree_relay_new(tree);
+    setRelay(object, r);
+}
+
+PHP_METHOD(STRtree, insert)
+{
+    STRtreeRelay *r;
+    zval *envz;
+    zval *payloadz;
+    GEOSGeometry *env;
+    STRtreeBox *box;
+
+    r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "Oz",
+            &envz, Geometry_ce_ptr, &payloadz) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (r->built) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSSTRtree: cannot insert after the tree has been queried "
+            "(STRtree is build-once; create a fresh tree)");
+        RETURN_NULL();
+    }
+
+    env = (GEOSGeometry*)getRelay(envz, Geometry_ce_ptr);
+
+    /* Box the payload (with cloned env), hand the box pointer to the tree,
+     * track the box. The cloned env ensures we can drive
+     * GEOSSTRtree_nearest_generic_r's distance callback later — that API
+     * receives the box pointer as the "item" and we need a geometry to
+     * compute distance to the probe. */
+    box = strtree_box_create(payloadz, env);
+    GEOSSTRtree_insert_r(GEOS_G(handle), r->tree, env, (void*)box);
+    strtree_box_track(r, box);
+}
+
+PHP_METHOD(STRtree, remove)
+{
+    STRtreeRelay *r;
+    zval *envz;
+    zval *payloadz;
+    GEOSGeometry *env;
+    STRtreeBox *box;
+    char rc;
+
+    r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "Oz",
+            &envz, Geometry_ce_ptr, &payloadz) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    env = (GEOSGeometry*)getRelay(envz, Geometry_ce_ptr);
+
+    /* Find the tracked box that matches this payload. If none, nothing to
+     * remove. (We don't even ask GEOS — without the right pointer it would
+     * never find it anyway.) */
+    box = strtree_find_box_for(r, payloadz);
+    if ( ! box ) {
+        RETURN_BOOL(0);
+    }
+
+    rc = GEOSSTRtree_remove_r(GEOS_G(handle), r->tree, env, (void*)box);
+    /* upstream: 1 = removed, 0 = not found, 2 = error. */
+    if (rc == 1) {
+        strtree_box_untrack(r, box);
+        strtree_box_free(box);
+        RETURN_BOOL(1);
+    } else if (rc == 2) {
+        if ( ! EG(exception)) {
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC, "GEOSSTRtree::remove() failed");
+        }
+        RETURN_NULL();
+    } else {
+        /* 0: GEOS didn't find it (e.g. envelope mismatch). Box stays tracked. */
+        RETURN_BOOL(0);
+    }
+}
+
+PHP_METHOD(STRtree, query)
+{
+    STRtreeRelay *r;
+    zval *envz;
+    zval *cbz = NULL;
+    GEOSGeometry *env;
+    STRtreeCallbackCtx ctx;
+
+    r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "O|z!",
+            &envz, Geometry_ce_ptr, &cbz) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    env = (GEOSGeometry*)getRelay(envz, Geometry_ce_ptr);
+
+    memset(&ctx, 0, sizeof(ctx));
+    ZVAL_UNDEF(&ctx.cb);
+    ZVAL_UNDEF(&ctx.exception);
+
+    array_init(return_value);
+    ctx.result_array = return_value;
+
+    if (cbz == NULL || Z_TYPE_P(cbz) == IS_NULL) {
+        ctx.collect_mode = 1;
+    } else {
+        char *err = NULL;
+        if ( ! zend_is_callable(cbz, 0, NULL)) {
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC,
+                "GEOSSTRtree::query: argument 2 is not a valid callable");
+            return;
+        }
+        (void)err;
+        ZVAL_COPY(&ctx.cb, cbz);
+        ctx.has_cb = 1;
+        ctx.collect_mode = 0;
+    }
+
+    /* GEOS builds the tree on first query; subsequent inserts will be
+     * rejected by our own guard. */
+    r->built = 1;
+
+    GEOSSTRtree_query_r(GEOS_G(handle), r->tree, env,
+            STRtree_trampoline, &ctx);
+
+    if (ctx.has_cb) zval_ptr_dtor(&ctx.cb);
+
+    if (strtree_propagate_exception(&ctx)) {
+        /* Discard partial result array (still set on return_value) — the
+         * exception will unwind past it on the PHP side. */
+        zval_ptr_dtor(return_value);
+        ZVAL_UNDEF(return_value);
+        return;
+    }
+    /* In callback mode, return_value is the empty array we initialised. */
+}
+
+PHP_METHOD(STRtree, iterate)
+{
+    STRtreeRelay *r;
+    zval *cbz;
+    STRtreeCallbackCtx ctx;
+
+    r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z",
+            &cbz) == FAILURE) {
+        RETURN_NULL();
+    }
+    if ( ! zend_is_callable(cbz, 0, NULL)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSSTRtree::iterate: argument 1 is not a valid callable");
+        RETURN_NULL();
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ZVAL_UNDEF(&ctx.cb);
+    ZVAL_UNDEF(&ctx.exception);
+    ZVAL_COPY(&ctx.cb, cbz);
+    ctx.has_cb = 1;
+    ctx.collect_mode = 0;
+    ctx.result_array = NULL;
+
+    /* iterate counts as a tree traversal — same build-once trigger. */
+    r->built = 1;
+
+    GEOSSTRtree_iterate_r(GEOS_G(handle), r->tree,
+            STRtree_trampoline, &ctx);
+
+    zval_ptr_dtor(&ctx.cb);
+
+    (void)strtree_propagate_exception(&ctx);
+}
+
+/* Distance callback for GEOSSTRtree_nearest_generic_r.
+ *
+ * The C API hands the callback two `void*` "items" — one of these is the
+ * probe item we passed to nearest_generic_r, the other is a stored
+ * STRtreeBox*. We disambiguate by pointer-identity: the probe pointer is
+ * also passed as `userdata`, so we compare each item against userdata to
+ * decide whether to use probe.env or box->env. */
+typedef struct {
+    GEOSGeometry *env;    /* not owned — borrowed from caller of nearest() */
+} STRtreeNearestProbe;
+
+static int
+STRtree_nearest_distance(const void *item1, const void *item2,
+        double *distance, void *userdata)
+{
+    const STRtreeNearestProbe *probe = (const STRtreeNearestProbe*)userdata;
+    GEOSGeometry *g1, *g2;
+
+    g1 = ((const void*)probe == item1)
+            ? probe->env : ((const STRtreeBox*)item1)->env;
+    g2 = ((const void*)probe == item2)
+            ? probe->env : ((const STRtreeBox*)item2)->env;
+
+    if ( ! g1 || ! g2) return 0;
+    if ( ! GEOSDistance_r(GEOS_G(handle), g1, g2, distance)) {
+        return 0;
+    }
+    return 1;
+}
+
+PHP_METHOD(STRtree, nearest)
+{
+    STRtreeRelay *r;
+    zval *gz;
+    GEOSGeometry *g;
+    const void *itemPtr;
+    STRtreeNearestProbe probe;
+
+    r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "O",
+            &gz, Geometry_ce_ptr) == FAILURE) {
+        RETURN_NULL();
+    }
+    g = (GEOSGeometry*)getRelay(gz, Geometry_ce_ptr);
+
+    /* Empty tree: nearest_generic_r returns NULL. Short-circuit and don't
+     * even build. */
+    if (zend_hash_num_elements(r->boxes) == 0) {
+        RETURN_NULL();
+    }
+
+    /* Build-once trigger. */
+    r->built = 1;
+
+    /* GEOSSTRtree_nearest_r requires items to be GEOSGeometry* — that is
+     * NOT what we store. We must use nearest_generic_r with a custom
+     * distance callback. The probe is the user's geometry; we wrap it in
+     * a small struct so the distance callback can recognise it (it is
+     * passed in as the "item" alongside the user's data). */
+    probe.env = g;
+
+    itemPtr = GEOSSTRtree_nearest_generic_r(GEOS_G(handle), r->tree,
+            (const void*)&probe, g,
+            STRtree_nearest_distance, (void*)&probe);
+
+    if ( ! itemPtr) {
+        RETURN_NULL();
+    }
+
+    {
+        const STRtreeBox *box = (const STRtreeBox*)itemPtr;
+        ZVAL_COPY(return_value, &box->payload);
+    }
+}
+
 /* ------ Initialization / Deinitialization / Meta ------------------ */
 
 /* per-module initialization */
@@ -6547,6 +7158,18 @@ PHP_MINIT_FUNCTION(geos)
 #if PHP_VERSION_ID >= 70000
     ClusterResult_object_handlers.offset = XtOffsetOf(Proxy, std);
     ClusterResult_object_handlers.free_obj = ClusterResult_dtor;
+#endif
+
+    /* STRtree (Item 17) */
+    INIT_CLASS_ENTRY(ce, "GEOSSTRtree", STRtree_methods);
+    STRtree_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
+    STRtree_ce_ptr->create_object = STRtree_create_obj;
+    memcpy(&STRtree_object_handlers,
+        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    STRtree_object_handlers.clone_obj = NULL;
+#if PHP_VERSION_ID >= 70000
+    STRtree_object_handlers.offset = XtOffsetOf(Proxy, std);
+    STRtree_object_handlers.free_obj = STRtree_dtor;
 #endif
 
 
