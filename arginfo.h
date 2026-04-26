@@ -156,6 +156,14 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_Geometry_hasZ            arginfo_void
 
+#define arginfo_Geometry_hasM            arginfo_void
+
+#define arginfo_Geometry_getZ            arginfo_void
+
+#define arginfo_Geometry_getM            arginfo_void
+
+#define arginfo_Geometry_getCoordSeq     arginfo_void
+
 
 #ifdef HAVE_GEOS_IS_CLOSED
 #define arginfo_Geometry_isClosed        arginfo_void
@@ -321,4 +329,62 @@ ZEND_END_ARG_INFO()
 #define arginfo_WKBWriter_write              arginfo_geom
 
 #define arginfo_WKBWriter_writeHEX           arginfo_geom
+
+/* GEOSCoordSeq methods arginfo */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_construct, 0, 0, 1)
+    ZEND_ARG_INFO(0, size)
+    ZEND_ARG_INFO(0, dim)
+    ZEND_ARG_INFO(0, hasM)
+ZEND_END_ARG_INFO()
+
+#define arginfo_CoordSeq_getSize         arginfo_void
+
+#define arginfo_CoordSeq_getDimensions   arginfo_void
+
+#define arginfo_CoordSeq_hasZ            arginfo_void
+
+#define arginfo_CoordSeq_hasM            arginfo_void
+
+#define arginfo_CoordSeq_isCCW           arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_setOrdinate, 0, 0, 2)
+    ZEND_ARG_INFO(0, idx)
+    ZEND_ARG_INFO(0, val)
+ZEND_END_ARG_INFO()
+
+#define arginfo_CoordSeq_setX            arginfo_CoordSeq_setOrdinate
+#define arginfo_CoordSeq_setY            arginfo_CoordSeq_setOrdinate
+#define arginfo_CoordSeq_setZ            arginfo_CoordSeq_setOrdinate
+#define arginfo_CoordSeq_setM            arginfo_CoordSeq_setOrdinate
+
+#define arginfo_CoordSeq_getX            arginfo_num
+#define arginfo_CoordSeq_getY            arginfo_num
+#define arginfo_CoordSeq_getZ            arginfo_num
+#define arginfo_CoordSeq_getM            arginfo_num
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_setXY, 0, 0, 3)
+    ZEND_ARG_INFO(0, idx)
+    ZEND_ARG_INFO(0, x)
+    ZEND_ARG_INFO(0, y)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_setXYZ, 0, 0, 4)
+    ZEND_ARG_INFO(0, idx)
+    ZEND_ARG_INFO(0, x)
+    ZEND_ARG_INFO(0, y)
+    ZEND_ARG_INFO(0, z)
+ZEND_END_ARG_INFO()
+
+#define arginfo_CoordSeq_getXY           arginfo_num
+#define arginfo_CoordSeq_getXYZ          arginfo_num
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_copyFromArrays, 0, 0, 2)
+    ZEND_ARG_INFO(0, x)
+    ZEND_ARG_INFO(0, y)
+    ZEND_ARG_INFO(0, z)
+    ZEND_ARG_INFO(0, m)
+ZEND_END_ARG_INFO()
+
+#define arginfo_CoordSeq_copyToArrays    arginfo_void
 

@@ -363,6 +363,8 @@ PHP_METHOD(Geometry, checkValidity);
 PHP_METHOD(Geometry, isSimple);
 PHP_METHOD(Geometry, isRing);
 PHP_METHOD(Geometry, hasZ);
+PHP_METHOD(Geometry, hasM);
+PHP_METHOD(Geometry, getCoordSeq);
 
 #ifdef HAVE_GEOS_IS_CLOSED
 PHP_METHOD(Geometry, isClosed);
@@ -387,6 +389,9 @@ PHP_METHOD(Geometry, getX);
 #ifdef HAVE_GEOS_GEOM_GET_Y
 PHP_METHOD(Geometry, getY);
 #endif
+
+PHP_METHOD(Geometry, getZ);
+PHP_METHOD(Geometry, getM);
 
 PHP_METHOD(Geometry, interiorRingN);
 PHP_METHOD(Geometry, exteriorRing);
@@ -502,6 +507,8 @@ static zend_function_entry Geometry_methods[] = {
     PHP_ME(Geometry, isSimple, arginfo_Geometry_isSimple, 0)
     PHP_ME(Geometry, isRing, arginfo_Geometry_isRing, 0)
     PHP_ME(Geometry, hasZ, arginfo_Geometry_hasZ, 0)
+    PHP_ME(Geometry, hasM, arginfo_Geometry_hasM, 0)
+    PHP_ME(Geometry, getCoordSeq, arginfo_Geometry_getCoordSeq, 0)
 
 #   ifdef HAVE_GEOS_IS_CLOSED
     PHP_ME(Geometry, isClosed, arginfo_Geometry_isClosed, 0)
@@ -526,6 +533,9 @@ static zend_function_entry Geometry_methods[] = {
 #   ifdef HAVE_GEOS_GEOM_GET_Y
     PHP_ME(Geometry, getY, arginfo_Geometry_getY, 0)
 #   endif
+
+    PHP_ME(Geometry, getZ, arginfo_Geometry_getZ, 0)
+    PHP_ME(Geometry, getM, arginfo_Geometry_getM, 0)
 
     PHP_ME(Geometry, interiorRingN, arginfo_Geometry_interiorRingN, 0)
     PHP_ME(Geometry, exteriorRing, arginfo_Geometry_exteriorRing, 0)
@@ -1849,6 +1859,25 @@ PHP_METHOD(Geometry, hasZ)
 }
 
 /**
+ * bool GEOSGeometry::hasM()
+ */
+PHP_METHOD(Geometry, hasM)
+{
+    GEOSGeometry *this;
+    int ret;
+    zend_bool retBool;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSHasM_r(GEOS_G(handle), this);
+    if ( ret == 2 ) RETURN_NULL(); /* should get an exception first */
+
+    /* return_value is a zval */
+    retBool = ret;
+    RETURN_BOOL(retBool);
+}
+
+/**
  * bool GEOSGeometry::isClosed()
  */
 #ifdef HAVE_GEOS_IS_CLOSED
@@ -2056,6 +2085,46 @@ PHP_METHOD(Geometry, getY)
     RETURN_DOUBLE(y);
 }
 #endif
+
+/**
+ * double GEOSGeometry::getZ()
+ *
+ * Only valid for non-empty Point geometries; the underlying
+ * GEOS API throws on other types.
+ */
+PHP_METHOD(Geometry, getZ)
+{
+    GEOSGeometry *geom;
+    int ret;
+    double z;
+
+    geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSGeomGetZ_r(GEOS_G(handle), geom, &z);
+    if ( ret == -1 ) RETURN_NULL(); /* should get an exception first */
+
+    RETURN_DOUBLE(z);
+}
+
+/**
+ * double GEOSGeometry::getM()
+ *
+ * Only valid for non-empty Point geometries; the underlying
+ * GEOS API throws on other types.
+ */
+PHP_METHOD(Geometry, getM)
+{
+    GEOSGeometry *geom;
+    int ret;
+    double m;
+
+    geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSGeomGetM_r(GEOS_G(handle), geom, &m);
+    if ( ret == -1 ) RETURN_NULL(); /* should get an exception first */
+
+    RETURN_DOUBLE(m);
+}
 
 /**
  * GEOSGeometry GEOSGeometry::interiorRingN()
@@ -2347,6 +2416,782 @@ PHP_METHOD(Geometry, node)
 #endif
 
 
+
+/* -- class GEOSCoordSeq -------------------- */
+
+/*
+ * Lifecycle / ownership invariants for GEOSCoordSeq:
+ *
+ *  1. A PHP GEOSCoordSeq object owns its underlying GEOSCoordSequence*. The
+ *     dtor calls GEOSCoordSeq_destroy_r on the relay pointer (if non-NULL).
+ *
+ *  2. GEOS C API functions that build a geometry from a coord-seq
+ *     (GEOSGeom_createPoint_r, _createLineString_r, _createLinearRing_r,
+ *     curved-geometry constructors, etc.) TRANSFER ownership of the coord-seq
+ *     into the new geometry. After such a handoff the PHP coord-seq object's
+ *     relay must be set to NULL via setRelay(zv, NULL) so the dtor does not
+ *     double-free. (Used by item 12/16 factory statics.)
+ *
+ *  3. GEOSGeom_getCoordSeq_r returns a NON-OWNING const pointer to a coord-seq
+ *     internal to a geometry. To wrap that as a PHP GEOSCoordSeq object we
+ *     must FIRST clone via GEOSCoordSeq_clone_r so the PHP object owns its
+ *     own copy. See GEOSGeometry::getCoordSeq() below for an example.
+ */
+
+PHP_METHOD(CoordSeq, __construct);
+PHP_METHOD(CoordSeq, getSize);
+PHP_METHOD(CoordSeq, getDimensions);
+PHP_METHOD(CoordSeq, hasZ);
+PHP_METHOD(CoordSeq, hasM);
+PHP_METHOD(CoordSeq, isCCW);
+PHP_METHOD(CoordSeq, setX);
+PHP_METHOD(CoordSeq, setY);
+PHP_METHOD(CoordSeq, setZ);
+PHP_METHOD(CoordSeq, setM);
+PHP_METHOD(CoordSeq, getX);
+PHP_METHOD(CoordSeq, getY);
+PHP_METHOD(CoordSeq, getZ);
+PHP_METHOD(CoordSeq, getM);
+PHP_METHOD(CoordSeq, setXY);
+PHP_METHOD(CoordSeq, setXYZ);
+PHP_METHOD(CoordSeq, getXY);
+PHP_METHOD(CoordSeq, getXYZ);
+PHP_METHOD(CoordSeq, copyFromArrays);
+PHP_METHOD(CoordSeq, copyToArrays);
+
+static zend_function_entry CoordSeq_methods[] = {
+    PHP_ME(CoordSeq, __construct, arginfo_CoordSeq_construct, 0)
+    PHP_ME(CoordSeq, getSize, arginfo_CoordSeq_getSize, 0)
+    PHP_ME(CoordSeq, getDimensions, arginfo_CoordSeq_getDimensions, 0)
+    PHP_ME(CoordSeq, hasZ, arginfo_CoordSeq_hasZ, 0)
+    PHP_ME(CoordSeq, hasM, arginfo_CoordSeq_hasM, 0)
+    PHP_ME(CoordSeq, isCCW, arginfo_CoordSeq_isCCW, 0)
+    PHP_ME(CoordSeq, setX, arginfo_CoordSeq_setX, 0)
+    PHP_ME(CoordSeq, setY, arginfo_CoordSeq_setY, 0)
+    PHP_ME(CoordSeq, setZ, arginfo_CoordSeq_setZ, 0)
+    PHP_ME(CoordSeq, setM, arginfo_CoordSeq_setM, 0)
+    PHP_ME(CoordSeq, getX, arginfo_CoordSeq_getX, 0)
+    PHP_ME(CoordSeq, getY, arginfo_CoordSeq_getY, 0)
+    PHP_ME(CoordSeq, getZ, arginfo_CoordSeq_getZ, 0)
+    PHP_ME(CoordSeq, getM, arginfo_CoordSeq_getM, 0)
+    PHP_ME(CoordSeq, setXY, arginfo_CoordSeq_setXY, 0)
+    PHP_ME(CoordSeq, setXYZ, arginfo_CoordSeq_setXYZ, 0)
+    PHP_ME(CoordSeq, getXY, arginfo_CoordSeq_getXY, 0)
+    PHP_ME(CoordSeq, getXYZ, arginfo_CoordSeq_getXYZ, 0)
+    PHP_ME(CoordSeq, copyFromArrays, arginfo_CoordSeq_copyFromArrays, 0)
+    PHP_ME(CoordSeq, copyToArrays, arginfo_CoordSeq_copyToArrays, 0)
+    {NULL, NULL, NULL}
+};
+
+static zend_class_entry *CoordSeq_ce_ptr;
+
+static zend_object_handlers CoordSeq_object_handlers;
+
+static void
+CoordSeq_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
+{
+#if PHP_VERSION_ID < 70000
+    Proxy *obj = (Proxy *)object;
+#else
+    Proxy *obj = php_geos_fetch_object(object);
+#endif
+
+    GEOSCoordSequence *seq = (GEOSCoordSequence*)obj->relay;
+    if (seq) {
+        GEOSCoordSeq_destroy_r(GEOS_G(handle), seq);
+    }
+
+#if PHP_VERSION_ID < 70000
+    zend_hash_destroy(obj->std.properties);
+    FREE_HASHTABLE(obj->std.properties);
+
+    efree(obj);
+#endif
+}
+
+static zend_object_value
+CoordSeq_create_obj (zend_class_entry *type TSRMLS_DC)
+{
+    return Gen_create_obj(type, CoordSeq_dtor, &CoordSeq_object_handlers);
+}
+
+/* Helper: bounds-check an index against the coord-seq size. Returns
+ * 0 on success, throws and returns 1 on failure. */
+static int
+CoordSeq_checkIndex(GEOSCoordSequence *seq, long idx)
+{
+    TSRMLS_FETCH();
+    unsigned int size = 0;
+
+    if (idx < 0) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSCoordSeq index %ld is negative", idx);
+        return 1;
+    }
+    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
+        return 1; /* GEOS will have thrown */
+    }
+    if ((unsigned int)idx >= size) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq index %ld out of range [0..%u)", idx, size);
+        return 1;
+    }
+    return 0;
+}
+
+PHP_METHOD(CoordSeq, __construct)
+{
+    GEOSCoordSequence *seq;
+    zval *object = getThis();
+    zend_long size;
+    zend_long dim = 2;
+    zend_bool hasM = 0;
+    int hasZ;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l|lb",
+            &size, &dim, &hasM) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (size < 0) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSCoordSeq size cannot be negative");
+        RETURN_NULL();
+    }
+    if (dim != 2 && dim != 3) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq dim must be 2 or 3 (got %ld)", (long)dim);
+        RETURN_NULL();
+    }
+
+    hasZ = (dim == 3) ? 1 : 0;
+
+    seq = GEOSCoordSeq_createWithDimensions_r(GEOS_G(handle),
+            (unsigned int)size, hasZ, hasM ? 1 : 0);
+    if ( ! seq ) {
+        php_error_docref(NULL TSRMLS_CC, E_ERROR,
+                "GEOSCoordSeq_createWithDimensions() failed (didn't initGEOS?)");
+        RETURN_NULL();
+    }
+
+    setRelay(object, seq);
+}
+
+PHP_METHOD(CoordSeq, getSize)
+{
+    GEOSCoordSequence *seq;
+    unsigned int size = 0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
+        RETURN_NULL();
+    }
+
+    RETURN_LONG((long)size);
+}
+
+PHP_METHOD(CoordSeq, getDimensions)
+{
+    GEOSCoordSequence *seq;
+    unsigned int dims = 0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (!GEOSCoordSeq_getDimensions_r(GEOS_G(handle), seq, &dims)) {
+        RETURN_NULL();
+    }
+
+    RETURN_LONG((long)dims);
+}
+
+PHP_METHOD(CoordSeq, hasZ)
+{
+    GEOSCoordSequence *seq;
+    char ret;
+    zend_bool retBool;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    ret = GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq);
+    retBool = ret ? 1 : 0;
+    RETURN_BOOL(retBool);
+}
+
+PHP_METHOD(CoordSeq, hasM)
+{
+    GEOSCoordSequence *seq;
+    char ret;
+    zend_bool retBool;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    ret = GEOSCoordSeq_hasM_r(GEOS_G(handle), seq);
+    retBool = ret ? 1 : 0;
+    RETURN_BOOL(retBool);
+}
+
+PHP_METHOD(CoordSeq, isCCW)
+{
+    GEOSCoordSequence *seq;
+    char is_ccw = 0;
+    zend_bool retBool;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (!GEOSCoordSeq_isCCW_r(GEOS_G(handle), seq, &is_ccw)) {
+        RETURN_NULL();
+    }
+
+    retBool = is_ccw ? 1 : 0;
+    RETURN_BOOL(retBool);
+}
+
+PHP_METHOD(CoordSeq, setX)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ld",
+            &idx, &val) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setX_r(GEOS_G(handle), seq, (unsigned int)idx, val)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, setY)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ld",
+            &idx, &val) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setY_r(GEOS_G(handle), seq, (unsigned int)idx, val)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, setZ)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ld",
+            &idx, &val) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::setZ called on a sequence without Z");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setZ_r(GEOS_G(handle), seq, (unsigned int)idx, val)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, setM)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ld",
+            &idx, &val) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasM_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::setM called on a sequence without M");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setM_r(GEOS_G(handle), seq, (unsigned int)idx, val)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, getX)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getX_r(GEOS_G(handle), seq, (unsigned int)idx, &val)) {
+        RETURN_NULL();
+    }
+
+    RETURN_DOUBLE(val);
+}
+
+PHP_METHOD(CoordSeq, getY)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getY_r(GEOS_G(handle), seq, (unsigned int)idx, &val)) {
+        RETURN_NULL();
+    }
+
+    RETURN_DOUBLE(val);
+}
+
+PHP_METHOD(CoordSeq, getZ)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::getZ called on a sequence without Z");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getZ_r(GEOS_G(handle), seq, (unsigned int)idx, &val)) {
+        RETURN_NULL();
+    }
+
+    RETURN_DOUBLE(val);
+}
+
+PHP_METHOD(CoordSeq, getM)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double val = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasM_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::getM called on a sequence without M");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getM_r(GEOS_G(handle), seq, (unsigned int)idx, &val)) {
+        RETURN_NULL();
+    }
+
+    RETURN_DOUBLE(val);
+}
+
+PHP_METHOD(CoordSeq, setXY)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double x, y;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ldd",
+            &idx, &x, &y) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setXY_r(GEOS_G(handle), seq, (unsigned int)idx, x, y)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, setXYZ)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double x, y, z;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lddd",
+            &idx, &x, &y, &z) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::setXYZ called on a sequence without Z");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_setXYZ_r(GEOS_G(handle), seq, (unsigned int)idx, x, y, z)) {
+        RETURN_NULL();
+    }
+}
+
+PHP_METHOD(CoordSeq, getXY)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double x = 0.0, y = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getXY_r(GEOS_G(handle), seq, (unsigned int)idx, &x, &y)) {
+        RETURN_NULL();
+    }
+
+    array_init(return_value);
+    add_assoc_double(return_value, "x", x);
+    add_assoc_double(return_value, "y", y);
+}
+
+PHP_METHOD(CoordSeq, getXYZ)
+{
+    GEOSCoordSequence *seq;
+    zend_long idx;
+    double x = 0.0, y = 0.0, z = 0.0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq)) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::getXYZ called on a sequence without Z");
+        RETURN_NULL();
+    }
+    if (CoordSeq_checkIndex(seq, idx)) RETURN_NULL();
+
+    if (!GEOSCoordSeq_getXYZ_r(GEOS_G(handle), seq, (unsigned int)idx, &x, &y, &z)) {
+        RETURN_NULL();
+    }
+
+    array_init(return_value);
+    add_assoc_double(return_value, "x", x);
+    add_assoc_double(return_value, "y", y);
+    add_assoc_double(return_value, "z", z);
+}
+
+/* Helper: copy a PHP numeric array into a freshly emalloc()'d double[].
+ * Returns the pointer (caller must efree) and writes the size. Returns NULL
+ * on failure (an exception will have been thrown). */
+static double *
+CoordSeq_zvalArrayToDoubles(zval *arr, unsigned int *out_size)
+{
+    TSRMLS_FETCH();
+    HashTable *ht;
+    double *buf;
+    unsigned int n, i;
+    GEOS_PHP_ZVAL data;
+
+    ht = HASH_OF(arr);
+    if (!ht) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSCoordSeq::copyFromArrays expected an array");
+        return NULL;
+    }
+    n = zend_hash_num_elements(ht);
+    *out_size = n;
+    if (n == 0) return NULL; /* legitimate empty: caller treats as no-op */
+
+    buf = (double*)emalloc(sizeof(double) * n);
+
+    zend_hash_internal_pointer_reset(ht);
+    for (i = 0; i < n; ++i) {
+        if (!GEOS_PHP_HASH_GET_CUR_DATA(ht, data)) {
+            efree(buf);
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC,
+                "GEOSCoordSeq::copyFromArrays: failed reading element %u",
+                i);
+            return NULL;
+        }
+        buf[i] = getZvalAsDouble(data);
+        zend_hash_move_forward(ht);
+    }
+
+    return buf;
+}
+
+PHP_METHOD(CoordSeq, copyFromArrays)
+{
+    GEOSCoordSequence *seq;
+    zval *xv = NULL, *yv = NULL, *zv = NULL, *mv = NULL;
+    double *xa = NULL, *ya = NULL, *za = NULL, *ma = NULL;
+    unsigned int xn = 0, yn = 0, zn = 0, mn = 0;
+    GEOSCoordSequence *newseq;
+    unsigned int seqsize = 0;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "aa|a!a!",
+            &xv, &yv, &zv, &mv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    /* Convert input arrays */
+    xa = CoordSeq_zvalArrayToDoubles(xv, &xn);
+    if (!xa && xn > 0) RETURN_NULL();
+    ya = CoordSeq_zvalArrayToDoubles(yv, &yn);
+    if (!ya && yn > 0) { if (xa) efree(xa); RETURN_NULL(); }
+
+    if (xn != yn) {
+        if (xa) efree(xa);
+        if (ya) efree(ya);
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::copyFromArrays: x/y array sizes differ (%u vs %u)",
+            xn, yn);
+        RETURN_NULL();
+    }
+
+    if (zv) {
+        za = CoordSeq_zvalArrayToDoubles(zv, &zn);
+        if (!za && zn > 0) {
+            if (xa) efree(xa); if (ya) efree(ya);
+            RETURN_NULL();
+        }
+        if (zn != xn) {
+            if (xa) efree(xa); if (ya) efree(ya); if (za) efree(za);
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC,
+                "GEOSCoordSeq::copyFromArrays: z array size %u != x size %u",
+                zn, xn);
+            RETURN_NULL();
+        }
+    }
+
+    if (mv) {
+        ma = CoordSeq_zvalArrayToDoubles(mv, &mn);
+        if (!ma && mn > 0) {
+            if (xa) efree(xa); if (ya) efree(ya); if (za) efree(za);
+            RETURN_NULL();
+        }
+        if (mn != xn) {
+            if (xa) efree(xa); if (ya) efree(ya);
+            if (za) efree(za); if (ma) efree(ma);
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC,
+                "GEOSCoordSeq::copyFromArrays: m array size %u != x size %u",
+                mn, xn);
+            RETURN_NULL();
+        }
+    }
+
+    /* Verify the destination has matching size */
+    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &seqsize)) {
+        if (xa) efree(xa); if (ya) efree(ya);
+        if (za) efree(za); if (ma) efree(ma);
+        RETURN_NULL();
+    }
+    if (seqsize != xn) {
+        if (xa) efree(xa); if (ya) efree(ya);
+        if (za) efree(za); if (ma) efree(ma);
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSCoordSeq::copyFromArrays: input array size %u != coord-seq size %u",
+            xn, seqsize);
+        RETURN_NULL();
+    }
+
+    /* Build a new coord-seq from arrays, then swap into our relay
+     * (destroy the old one). GEOSCoordSeq_copyFromArrays_r does not
+     * accept an existing destination buffer.
+     */
+    newseq = GEOSCoordSeq_copyFromArrays_r(GEOS_G(handle),
+            xa, ya, za, ma, xn);
+
+    if (xa) efree(xa);
+    if (ya) efree(ya);
+    if (za) efree(za);
+    if (ma) efree(ma);
+
+    if (!newseq) RETURN_NULL();
+
+    /* Replace existing coord-seq with the new one. */
+    GEOSCoordSeq_destroy_r(GEOS_G(handle), seq);
+    setRelay(getThis(), newseq);
+}
+
+PHP_METHOD(CoordSeq, copyToArrays)
+{
+    GEOSCoordSequence *seq;
+    unsigned int size = 0, i;
+    char hasZ, hasM;
+    double *xa = NULL, *ya = NULL, *za = NULL, *ma = NULL;
+    zval *xarr, *yarr, *zarr = NULL, *marr = NULL;
+
+    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
+
+    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
+        RETURN_NULL();
+    }
+    hasZ = GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq);
+    hasM = GEOSCoordSeq_hasM_r(GEOS_G(handle), seq);
+
+    /* GEOSCoordSeq_copyToArrays_r requires non-NULL buffers when the
+     * sequence has the corresponding ordinate. Allocate accordingly. */
+    if (size > 0) {
+        xa = (double*)emalloc(sizeof(double) * size);
+        ya = (double*)emalloc(sizeof(double) * size);
+        if (hasZ) za = (double*)emalloc(sizeof(double) * size);
+        if (hasM) ma = (double*)emalloc(sizeof(double) * size);
+    }
+
+    if (size > 0 && !GEOSCoordSeq_copyToArrays_r(GEOS_G(handle), seq,
+                xa, ya, za, ma)) {
+        if (xa) efree(xa); if (ya) efree(ya);
+        if (za) efree(za); if (ma) efree(ma);
+        RETURN_NULL();
+    }
+
+    array_init(return_value);
+
+#if PHP_VERSION_ID >= 70000
+    {
+        zval xz, yz;
+        array_init(&xz);
+        array_init(&yz);
+        for (i = 0; i < size; ++i) {
+            add_next_index_double(&xz, xa[i]);
+            add_next_index_double(&yz, ya[i]);
+        }
+        add_assoc_zval(return_value, "x", &xz);
+        add_assoc_zval(return_value, "y", &yz);
+        if (hasZ) {
+            zval zz;
+            array_init(&zz);
+            for (i = 0; i < size; ++i) add_next_index_double(&zz, za[i]);
+            add_assoc_zval(return_value, "z", &zz);
+        }
+        if (hasM) {
+            zval mz;
+            array_init(&mz);
+            for (i = 0; i < size; ++i) add_next_index_double(&mz, ma[i]);
+            add_assoc_zval(return_value, "m", &mz);
+        }
+    }
+#else
+    MAKE_STD_ZVAL(xarr); array_init(xarr);
+    MAKE_STD_ZVAL(yarr); array_init(yarr);
+    for (i = 0; i < size; ++i) {
+        add_next_index_double(xarr, xa[i]);
+        add_next_index_double(yarr, ya[i]);
+    }
+    add_assoc_zval(return_value, "x", xarr);
+    add_assoc_zval(return_value, "y", yarr);
+    if (hasZ) {
+        MAKE_STD_ZVAL(zarr); array_init(zarr);
+        for (i = 0; i < size; ++i) add_next_index_double(zarr, za[i]);
+        add_assoc_zval(return_value, "z", zarr);
+    }
+    if (hasM) {
+        MAKE_STD_ZVAL(marr); array_init(marr);
+        for (i = 0; i < size; ++i) add_next_index_double(marr, ma[i]);
+        add_assoc_zval(return_value, "m", marr);
+    }
+    /* silence unused-warning for the !=PHP7 branch. */
+    (void)xarr; (void)yarr; (void)zarr; (void)marr;
+#endif
+
+    if (xa) efree(xa); if (ya) efree(ya);
+    if (za) efree(za); if (ma) efree(ma);
+}
+
+/* GEOSGeometry::getCoordSeq()
+ *
+ * Returns a *cloned* GEOSCoordSeq representing the geometry's
+ * coordinate sequence. Only valid for Point/LineString/LinearRing.
+ */
+PHP_METHOD(Geometry, getCoordSeq)
+{
+    GEOSGeometry *geom;
+    const GEOSCoordSequence *cs;
+    GEOSCoordSequence *clone;
+    int typId;
+
+    geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    typId = GEOSGeomTypeId_r(GEOS_G(handle), geom);
+    if (typId != GEOS_POINT && typId != GEOS_LINESTRING
+            && typId != GEOS_LINEARRING) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::getCoordSeq is only valid for Point, LineString, "
+            "or LinearRing (got typeId=%d)", typId);
+        RETURN_NULL();
+    }
+
+    cs = GEOSGeom_getCoordSeq_r(GEOS_G(handle), geom);
+    if (!cs) RETURN_NULL(); /* exception will have been thrown */
+
+    /* GEOSGeom_getCoordSeq_r returns a non-owning pointer to the
+     * geometry's internal coord-seq. We must clone it before handing
+     * it to a PHP object that owns its relay. */
+    clone = GEOSCoordSeq_clone_r(GEOS_G(handle), cs);
+    if (!clone) RETURN_NULL();
+
+    object_init_ex(return_value, CoordSeq_ce_ptr);
+    setRelay(return_value, clone);
+}
 
 /* -- class GEOSWKTReader -------------------- */
 
@@ -3342,6 +4187,18 @@ PHP_MINIT_FUNCTION(geos)
 #if PHP_VERSION_ID >= 70000
     WKBReader_object_handlers.offset = XtOffsetOf(Proxy, std);
     WKBReader_object_handlers.free_obj = WKBReader_dtor;
+#endif
+
+    /* CoordSeq */
+    INIT_CLASS_ENTRY(ce, "GEOSCoordSeq", CoordSeq_methods);
+    CoordSeq_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
+    CoordSeq_ce_ptr->create_object = CoordSeq_create_obj;
+    memcpy(&CoordSeq_object_handlers,
+        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    CoordSeq_object_handlers.clone_obj = NULL;
+#if PHP_VERSION_ID >= 70000
+    CoordSeq_object_handlers.offset = XtOffsetOf(Proxy, std);
+    CoordSeq_object_handlers.free_obj = CoordSeq_dtor;
 #endif
 
 
