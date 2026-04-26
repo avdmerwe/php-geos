@@ -669,3 +669,88 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_STRtree_nearest                  arginfo_geom
 
+
+/* -- Item 18: PreparedGeometry ------------------- */
+
+#define arginfo_Geometry_prepare                 arginfo_void
+
+#define arginfo_PreparedGeometry_construct       arginfo_void
+
+/* Most prepared predicates take a single GEOSGeometry $other. */
+#define arginfo_PreparedGeometry_contains         arginfo_geom
+#define arginfo_PreparedGeometry_containsProperly arginfo_geom
+#define arginfo_PreparedGeometry_coveredBy        arginfo_geom
+#define arginfo_PreparedGeometry_covers           arginfo_geom
+#define arginfo_PreparedGeometry_crosses          arginfo_geom
+#define arginfo_PreparedGeometry_disjoint         arginfo_geom
+#define arginfo_PreparedGeometry_intersects       arginfo_geom
+#define arginfo_PreparedGeometry_overlaps         arginfo_geom
+#define arginfo_PreparedGeometry_touches          arginfo_geom
+#define arginfo_PreparedGeometry_within           arginfo_geom
+#define arginfo_PreparedGeometry_relate           arginfo_geom
+#define arginfo_PreparedGeometry_distance         arginfo_geom
+#define arginfo_PreparedGeometry_nearestPoints    arginfo_geom
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_containsXY, 0, 0, 2)
+    ZEND_ARG_INFO(0, x)
+    ZEND_ARG_INFO(0, y)
+ZEND_END_ARG_INFO()
+
+#define arginfo_PreparedGeometry_intersectsXY    arginfo_PreparedGeometry_containsXY
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_relatePattern, 0, 0, 2)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, pattern)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_distanceWithin, 0, 0, 2)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, maxDist)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 19: Coordinate-transform callbacks ----- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_transformXY, 0, 0, 1)
+    ZEND_ARG_INFO(0, cb)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_transformXYZ            arginfo_Geometry_transformXY
+
+
+/* -- Item 20: P2 fillers ------------------------- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_hilbertCode, 0, 0, 2)
+    ZEND_ARG_INFO(0, extent)
+    ZEND_ARG_INFO(0, level)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_gridIntersectionFractions, 0, 0, 6)
+    ZEND_ARG_INFO(0, xmin)
+    ZEND_ARG_INFO(0, ymin)
+    ZEND_ARG_INFO(0, xmax)
+    ZEND_ARG_INFO(0, ymax)
+    ZEND_ARG_INFO(0, nx)
+    ZEND_ARG_INFO(0, ny)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSOrientationIndex, 0, 0, 6)
+    ZEND_ARG_INFO(0, ax)
+    ZEND_ARG_INFO(0, ay)
+    ZEND_ARG_INFO(0, bx)
+    ZEND_ARG_INFO(0, by)
+    ZEND_ARG_INFO(0, px)
+    ZEND_ARG_INFO(0, py)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSSegmentIntersection, 0, 0, 8)
+    ZEND_ARG_INFO(0, ax0)
+    ZEND_ARG_INFO(0, ay0)
+    ZEND_ARG_INFO(0, ax1)
+    ZEND_ARG_INFO(0, ay1)
+    ZEND_ARG_INFO(0, bx0)
+    ZEND_ARG_INFO(0, by0)
+    ZEND_ARG_INFO(0, bx1)
+    ZEND_ARG_INFO(0, by1)
+ZEND_END_ARG_INFO()
+
