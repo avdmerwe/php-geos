@@ -1,7 +1,7 @@
 From 776397705293daca0d40c75bfbe80a4d71f71d01 Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 16:19:19 +0200
-Subject: [PATCH 3/8] Add GEOSCoordSeq class + Geometry sibling accessors
+Subject: [PATCH 3/9] Add GEOSCoordSeq class + Geometry sibling accessors
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

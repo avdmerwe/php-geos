@@ -1,7 +1,7 @@
 From 7ddf5bebc7b996d5044bb9ed7b8d7d3d5ad9f44c Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 17:18:57 +0200
-Subject: [PATCH 7/8] Item 17: GEOSSTRtree spatial index
+Subject: [PATCH 7/9] Item 17: GEOSSTRtree spatial index
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

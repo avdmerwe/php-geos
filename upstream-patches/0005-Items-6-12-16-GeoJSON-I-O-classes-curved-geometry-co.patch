@@ -1,7 +1,7 @@
 From 6063ade84b493ed675e49418e08c08a26d33dea7 Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 16:45:56 +0200
-Subject: [PATCH 5/8] Items 6,12,16: GeoJSON I/O classes, curved geometry
+Subject: [PATCH 5/9] Items 6,12,16: GeoJSON I/O classes, curved geometry
  constructors, factory statics
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

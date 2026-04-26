@@ -1,7 +1,7 @@
 From e4f8569456a6dd2fb40e3ce5c01999af04ccd93d Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 15:15:45 +0200
-Subject: [PATCH 1/8] Add Debian/Ubuntu packaging from 1.0.0-8ubuntu2
+Subject: [PATCH 1/9] Add Debian/Ubuntu packaging from 1.0.0-8ubuntu2
 
 Imported from Ubuntu plucky/resolute php-geos packaging. Stripped four
 patches now applied upstream in gitea HEAD (dfe1ab1):

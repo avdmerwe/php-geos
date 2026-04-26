@@ -1,7 +1,7 @@
 From 54ff556fd709f480ee15b3eb4bce3537e286d22b Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 17:08:22 +0200
-Subject: [PATCH 6/8] Items 13-15: Coverage, Clustering, Constrained Delaunay
+Subject: [PATCH 6/9] Items 13-15: Coverage, Clustering, Constrained Delaunay
 
 Item 13 - Coverage processing
   GEOSGeometry::coverageUnion()

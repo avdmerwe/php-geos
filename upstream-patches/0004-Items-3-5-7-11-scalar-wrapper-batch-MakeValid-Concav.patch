@@ -1,7 +1,7 @@
 From e3e6e84a4c29ffb658003e8fe26aefd4c9b5bd00 Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 16:34:50 +0200
-Subject: [PATCH 4/8] Items 3-5,7-11: scalar-wrapper batch (MakeValid,
+Subject: [PATCH 4/9] Items 3-5,7-11: scalar-wrapper batch (MakeValid,
  ConcaveHull, PrecOverlays, WKB flavor, hull/metric/distance/linear/utility
  extras)
 

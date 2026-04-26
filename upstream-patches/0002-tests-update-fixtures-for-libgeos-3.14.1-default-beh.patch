@@ -1,7 +1,7 @@
 From 4649337cc64b71470b2f26cca66bed6cd33762b7 Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 16:08:55 +0200
-Subject: [PATCH 2/8] tests: update fixtures for libgeos 3.14.1 default
+Subject: [PATCH 2/9] tests: update fixtures for libgeos 3.14.1 default
  behaviour
 
 GEOS 3.14.1 introduced several backwards-compatible default-behaviour

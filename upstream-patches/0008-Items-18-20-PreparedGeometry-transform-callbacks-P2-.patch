@@ -1,7 +1,7 @@
 From 6258115645bd8496bc912e0131ea079308466d25 Mon Sep 17 00:00:00 2001
 From: Abraham van der Merwe <abz@frogfoot.com>
 Date: Sun, 26 Apr 2026 17:28:39 +0200
-Subject: [PATCH 8/8] Items 18-20: PreparedGeometry, transform callbacks, P2
+Subject: [PATCH 8/9] Items 18-20: PreparedGeometry, transform callbacks, P2
  fillers
 
 Item 18 - GEOSPreparedGeometry
