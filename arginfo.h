@@ -64,18 +64,28 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_Geometry_envelope        arginfo_void
 
-#define arginfo_Geometry_intersection    arginfo_geom
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_intersection, 0, 0, 1)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, gridSize)
+ZEND_END_ARG_INFO()
 
 #define arginfo_Geometry_convexHull      arginfo_void
 
-#define arginfo_Geometry_difference      arginfo_geom
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_difference, 0, 0, 1)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, gridSize)
+ZEND_END_ARG_INFO()
 
-#define arginfo_Geometry_symDifference   arginfo_geom
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_symDifference, 0, 0, 1)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, gridSize)
+ZEND_END_ARG_INFO()
 
 #define arginfo_Geometry_boundary        arginfo_void
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_union, 0, 0, 0)
     ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, gridSize)
 ZEND_END_ARG_INFO()
 
 #define arginfo_Geometry_pointOnSurface  arginfo_void
@@ -387,4 +397,124 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_CoordSeq_copyFromArrays, 0, 0, 2)
 ZEND_END_ARG_INFO()
 
 #define arginfo_CoordSeq_copyToArrays    arginfo_void
+
+
+/* -- Item 3: MakeValid family -------------------- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_makeValid, 0, 0, 0)
+    ZEND_ARG_INFO(0, params)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 4: Concave hull family ----------------- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHull, 0, 0, 1)
+    ZEND_ARG_INFO(0, ratio)
+    ZEND_ARG_INFO(0, allowHoles)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHullByLength, 0, 0, 1)
+    ZEND_ARG_INFO(0, maxLength)
+    ZEND_ARG_INFO(0, allowHoles)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHullOfPolygons, 0, 0, 1)
+    ZEND_ARG_INFO(0, ratio)
+    ZEND_ARG_INFO(0, isTight)
+    ZEND_ARG_INFO(0, allowHoles)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_polygonHullSimplify, 0, 0, 2)
+    ZEND_ARG_INFO(0, isOuter)
+    ZEND_ARG_INFO(0, param)
+    ZEND_ARG_INFO(0, mode)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 7: WKB flavor + reader fix-structure --- */
+
+#define arginfo_WKBWriter_setFlavor          arginfo_num
+#define arginfo_WKBWriter_getFlavor          arginfo_void
+#define arginfo_WKTReader_setFixStructure    arginfo_num
+#define arginfo_WKBReader_setFixStructure    arginfo_num
+
+
+/* -- Item 8: Hull / metric extras ---------------- */
+
+#define arginfo_Geometry_minimumBoundingCircle    arginfo_void
+#define arginfo_Geometry_minimumRotatedRectangle  arginfo_void
+#define arginfo_Geometry_minimumWidth             arginfo_void
+#define arginfo_Geometry_minimumClearance         arginfo_void
+#define arginfo_Geometry_minimumClearanceLine     arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_maximumInscribedCircle, 0, 0, 1)
+    ZEND_ARG_INFO(0, tol)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_largestEmptyCircle, 0, 0, 1)
+    ZEND_ARG_INFO(0, tol)
+    ZEND_ARG_INFO(0, boundary)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 9: Distance / metric extras ------------ */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_distanceWithin, 0, 0, 2)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, maxDist)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_distanceIndexed     arginfo_geom
+#define arginfo_Geometry_nearestPoints       arginfo_geom
+#define arginfo_Geometry_frechetDistance     arginfo_geom
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_frechetDistanceDensify, 0, 0, 2)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, frac)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_hausdorffDistanceDensify, 0, 0, 2)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, frac)
+ZEND_END_ARG_INFO()
+
+
+/* -- Item 10: Linear referencing extras ---------- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_lineSubstring, 0, 0, 2)
+    ZEND_ARG_INFO(0, startFrac)
+    ZEND_ARG_INFO(0, endFrac)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_lineMergeDirected   arginfo_void
+
+
+/* -- Item 11: Construction / utility extras ------ */
+
+#define arginfo_Geometry_reverse             arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_densify, 0, 0, 1)
+    ZEND_ARG_INFO(0, dist)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_removeRepeatedPoints, 0, 0, 0)
+    ZEND_ARG_INFO(0, tol)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_orientPolygons, 0, 0, 0)
+    ZEND_ARG_INFO(0, exterior_cw)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_equalsIdentical     arginfo_geom
+#define arginfo_Geometry_getXMin             arginfo_void
+#define arginfo_Geometry_getXMax             arginfo_void
+#define arginfo_Geometry_getYMin             arginfo_void
+#define arginfo_Geometry_getYMax             arginfo_void
+#define arginfo_Geometry_getExtent           arginfo_void
+#define arginfo_Geometry_buildArea           arginfo_void
+
+#define arginfo_GEOSPolygonizeValid          arginfo_geom
+#define arginfo_GEOSPolygonizeCutEdges       arginfo_geom
+#define arginfo_GEOSBuildArea                arginfo_geom
+#define arginfo_GEOSDisjointSubsetUnion      arginfo_geom
 

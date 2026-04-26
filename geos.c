@@ -45,6 +45,10 @@ PHP_MINFO_FUNCTION(geos);
 PHP_FUNCTION(GEOSVersion);
 PHP_FUNCTION(GEOSPolygonize);
 PHP_FUNCTION(GEOSLineMerge);
+PHP_FUNCTION(GEOSPolygonizeValid);
+PHP_FUNCTION(GEOSPolygonizeCutEdges);
+PHP_FUNCTION(GEOSBuildArea);
+PHP_FUNCTION(GEOSDisjointSubsetUnion);
 
 #ifdef HAVE_GEOS_SHARED_PATHS
 PHP_FUNCTION(GEOSSharedPaths);
@@ -89,6 +93,10 @@ static zend_function_entry geos_functions[] = {
     PHP_FE(GEOSVersion, arginfo_GEOSVersion)
     PHP_FE(GEOSPolygonize, arginfo_GEOSPolygonize)
     PHP_FE(GEOSLineMerge, arginfo_GEOSLineMerge)
+    PHP_FE(GEOSPolygonizeValid, arginfo_GEOSPolygonizeValid)
+    PHP_FE(GEOSPolygonizeCutEdges, arginfo_GEOSPolygonizeCutEdges)
+    PHP_FE(GEOSBuildArea, arginfo_GEOSBuildArea)
+    PHP_FE(GEOSDisjointSubsetUnion, arginfo_GEOSDisjointSubsetUnion)
 
 #   ifdef HAVE_GEOS_SHARED_PATHS
     PHP_FE(GEOSSharedPaths, arginfo_GEOSSharedPaths)
@@ -439,6 +447,39 @@ PHP_METHOD(Geometry, voronoiDiagram);
 PHP_METHOD(Geometry, clipByRect);
 #endif
 
+/* Items 3..11 — added methods */
+PHP_METHOD(Geometry, makeValid);
+PHP_METHOD(Geometry, concaveHull);
+PHP_METHOD(Geometry, concaveHullByLength);
+PHP_METHOD(Geometry, concaveHullOfPolygons);
+PHP_METHOD(Geometry, polygonHullSimplify);
+PHP_METHOD(Geometry, minimumBoundingCircle);
+PHP_METHOD(Geometry, minimumRotatedRectangle);
+PHP_METHOD(Geometry, minimumWidth);
+PHP_METHOD(Geometry, minimumClearance);
+PHP_METHOD(Geometry, minimumClearanceLine);
+PHP_METHOD(Geometry, maximumInscribedCircle);
+PHP_METHOD(Geometry, largestEmptyCircle);
+PHP_METHOD(Geometry, distanceWithin);
+PHP_METHOD(Geometry, distanceIndexed);
+PHP_METHOD(Geometry, nearestPoints);
+PHP_METHOD(Geometry, frechetDistance);
+PHP_METHOD(Geometry, frechetDistanceDensify);
+PHP_METHOD(Geometry, hausdorffDistanceDensify);
+PHP_METHOD(Geometry, lineSubstring);
+PHP_METHOD(Geometry, lineMergeDirected);
+PHP_METHOD(Geometry, reverse);
+PHP_METHOD(Geometry, densify);
+PHP_METHOD(Geometry, removeRepeatedPoints);
+PHP_METHOD(Geometry, orientPolygons);
+PHP_METHOD(Geometry, equalsIdentical);
+PHP_METHOD(Geometry, getXMin);
+PHP_METHOD(Geometry, getXMax);
+PHP_METHOD(Geometry, getYMin);
+PHP_METHOD(Geometry, getYMax);
+PHP_METHOD(Geometry, getExtent);
+PHP_METHOD(Geometry, buildArea);
+
 static zend_function_entry Geometry_methods[] = {
     PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
     PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
@@ -583,10 +624,46 @@ static zend_function_entry Geometry_methods[] = {
     PHP_ME(Geometry, clipByRect, arginfo_Geometry_clipByRect, 0)
 #   endif
 
+    /* Items 3..11 — added methods */
+    PHP_ME(Geometry, makeValid, arginfo_Geometry_makeValid, 0)
+    PHP_ME(Geometry, concaveHull, arginfo_Geometry_concaveHull, 0)
+    PHP_ME(Geometry, concaveHullByLength, arginfo_Geometry_concaveHullByLength, 0)
+    PHP_ME(Geometry, concaveHullOfPolygons, arginfo_Geometry_concaveHullOfPolygons, 0)
+    PHP_ME(Geometry, polygonHullSimplify, arginfo_Geometry_polygonHullSimplify, 0)
+    PHP_ME(Geometry, minimumBoundingCircle, arginfo_Geometry_minimumBoundingCircle, 0)
+    PHP_ME(Geometry, minimumRotatedRectangle, arginfo_Geometry_minimumRotatedRectangle, 0)
+    PHP_ME(Geometry, minimumWidth, arginfo_Geometry_minimumWidth, 0)
+    PHP_ME(Geometry, minimumClearance, arginfo_Geometry_minimumClearance, 0)
+    PHP_ME(Geometry, minimumClearanceLine, arginfo_Geometry_minimumClearanceLine, 0)
+    PHP_ME(Geometry, maximumInscribedCircle, arginfo_Geometry_maximumInscribedCircle, 0)
+    PHP_ME(Geometry, largestEmptyCircle, arginfo_Geometry_largestEmptyCircle, 0)
+    PHP_ME(Geometry, distanceWithin, arginfo_Geometry_distanceWithin, 0)
+    PHP_ME(Geometry, distanceIndexed, arginfo_Geometry_distanceIndexed, 0)
+    PHP_ME(Geometry, nearestPoints, arginfo_Geometry_nearestPoints, 0)
+    PHP_ME(Geometry, frechetDistance, arginfo_Geometry_frechetDistance, 0)
+    PHP_ME(Geometry, frechetDistanceDensify, arginfo_Geometry_frechetDistanceDensify, 0)
+    PHP_ME(Geometry, hausdorffDistanceDensify, arginfo_Geometry_hausdorffDistanceDensify, 0)
+    PHP_ME(Geometry, lineSubstring, arginfo_Geometry_lineSubstring, 0)
+    PHP_ME(Geometry, lineMergeDirected, arginfo_Geometry_lineMergeDirected, 0)
+    PHP_ME(Geometry, reverse, arginfo_Geometry_reverse, 0)
+    PHP_ME(Geometry, densify, arginfo_Geometry_densify, 0)
+    PHP_ME(Geometry, removeRepeatedPoints, arginfo_Geometry_removeRepeatedPoints, 0)
+    PHP_ME(Geometry, orientPolygons, arginfo_Geometry_orientPolygons, 0)
+    PHP_ME(Geometry, equalsIdentical, arginfo_Geometry_equalsIdentical, 0)
+    PHP_ME(Geometry, getXMin, arginfo_Geometry_getXMin, 0)
+    PHP_ME(Geometry, getXMax, arginfo_Geometry_getXMax, 0)
+    PHP_ME(Geometry, getYMin, arginfo_Geometry_getYMin, 0)
+    PHP_ME(Geometry, getYMax, arginfo_Geometry_getYMax, 0)
+    PHP_ME(Geometry, getExtent, arginfo_Geometry_getExtent, 0)
+    PHP_ME(Geometry, buildArea, arginfo_Geometry_buildArea, 0)
+
     {NULL, NULL, NULL}
 };
 
 static zend_class_entry *Geometry_ce_ptr;
+/* forward declared for use by Geometry::nearestPoints; defined with the
+ * GEOSCoordSeq class below. */
+static zend_class_entry *CoordSeq_ce_ptr;
 
 static zend_object_handlers Geometry_object_handlers;
 
@@ -1046,16 +1123,30 @@ PHP_METHOD(Geometry, intersection)
     GEOSGeometry *other;
     GEOSGeometry *ret;
     zval *zobj;
+    double gridSize = 0.0;
+    int has_gridSize = 0;
 
     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
-            == FAILURE) {
-        RETURN_NULL();
+    if (ZEND_NUM_ARGS() >= 2) {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
+                &gridSize) == FAILURE) {
+            RETURN_NULL();
+        }
+        has_gridSize = 1;
+    } else {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+                == FAILURE) {
+            RETURN_NULL();
+        }
     }
     other = getRelay(zobj, Geometry_ce_ptr);
 
-    ret = GEOSIntersection_r(GEOS_G(handle), this, other);
+    if (has_gridSize) {
+        ret = GEOSIntersectionPrec_r(GEOS_G(handle), this, other, gridSize);
+    } else {
+        ret = GEOSIntersection_r(GEOS_G(handle), this, other);
+    }
     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
 
     /* return_value is a zval */
@@ -1110,16 +1201,30 @@ PHP_METHOD(Geometry, difference)
     GEOSGeometry *other;
     GEOSGeometry *ret;
     zval *zobj;
+    double gridSize = 0.0;
+    int has_gridSize = 0;
 
     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
-            == FAILURE) {
-        RETURN_NULL();
+    if (ZEND_NUM_ARGS() >= 2) {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
+                &gridSize) == FAILURE) {
+            RETURN_NULL();
+        }
+        has_gridSize = 1;
+    } else {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+                == FAILURE) {
+            RETURN_NULL();
+        }
     }
     other = getRelay(zobj, Geometry_ce_ptr);
 
-    ret = GEOSDifference_r(GEOS_G(handle), this, other);
+    if (has_gridSize) {
+        ret = GEOSDifferencePrec_r(GEOS_G(handle), this, other, gridSize);
+    } else {
+        ret = GEOSDifference_r(GEOS_G(handle), this, other);
+    }
     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
 
     /* return_value is a zval */
@@ -1133,16 +1238,30 @@ PHP_METHOD(Geometry, symDifference)
     GEOSGeometry *other;
     GEOSGeometry *ret;
     zval *zobj;
+    double gridSize = 0.0;
+    int has_gridSize = 0;
 
     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
-            == FAILURE) {
-        RETURN_NULL();
+    if (ZEND_NUM_ARGS() >= 2) {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
+                &gridSize) == FAILURE) {
+            RETURN_NULL();
+        }
+        has_gridSize = 1;
+    } else {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+                == FAILURE) {
+            RETURN_NULL();
+        }
     }
     other = getRelay(zobj, Geometry_ce_ptr);
 
-    ret = GEOSSymDifference_r(GEOS_G(handle), this, other);
+    if (has_gridSize) {
+        ret = GEOSSymDifferencePrec_r(GEOS_G(handle), this, other, gridSize);
+    } else {
+        ret = GEOSSymDifference_r(GEOS_G(handle), this, other);
+    }
     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
 
     /* return_value is a zval */
@@ -1166,8 +1285,9 @@ PHP_METHOD(Geometry, boundary)
 }
 
 /**
- * GEOSGeometry::union(otherGeom)
  * GEOSGeometry::union()
+ * GEOSGeometry::union(otherGeom)
+ * GEOSGeometry::union(otherGeom = null, gridSize)
  */
 PHP_METHOD(Geometry, union)
 {
@@ -1175,23 +1295,41 @@ PHP_METHOD(Geometry, union)
     GEOSGeometry *other;
     GEOSGeometry *ret;
     zval *zobj = NULL;
+    double gridSize = 0.0;
+    int has_gridSize = 0;
 
     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|o", &zobj)
-            == FAILURE) {
-        RETURN_NULL();
+    if (ZEND_NUM_ARGS() >= 2) {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o!d", &zobj,
+                &gridSize) == FAILURE) {
+            RETURN_NULL();
+        }
+        has_gridSize = 1;
+    } else {
+        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|o!", &zobj)
+                == FAILURE) {
+            RETURN_NULL();
+        }
     }
 
     if ( zobj ) {
         other = getRelay(zobj, Geometry_ce_ptr);
-        ret = GEOSUnion_r(GEOS_G(handle), this, other);
+        if (has_gridSize) {
+            ret = GEOSUnionPrec_r(GEOS_G(handle), this, other, gridSize);
+        } else {
+            ret = GEOSUnion_r(GEOS_G(handle), this, other);
+        }
     } else {
+        if (has_gridSize) {
+            ret = GEOSUnaryUnionPrec_r(GEOS_G(handle), this, gridSize);
+        } else {
 #       ifdef HAVE_GEOS_UNARY_UNION
-        ret = GEOSUnaryUnion_r(GEOS_G(handle), this);
+            ret = GEOSUnaryUnion_r(GEOS_G(handle), this);
 #       else
-        ret = GEOSUnionCascaded_r(GEOS_G(handle), this);
+            ret = GEOSUnionCascaded_r(GEOS_G(handle), this);
 #       endif
+        }
     }
 
     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
@@ -2417,6 +2555,664 @@ PHP_METHOD(Geometry, node)
 
 
 
+/* -- Items 3..11: scalar wrappers on GEOSGeometry -------------------- */
+
+/**
+ * GEOSGeometry::makeValid(array $params = [])
+ *
+ * Empty params -> GEOSMakeValid_r.
+ * Otherwise, build a GEOSMakeValidParams via setMethod / setKeepCollapsed
+ * and invoke GEOSMakeValidWithParams_r.
+ *
+ * Recognised keys:
+ *   'method'         => "linework" or "structure" (string)
+ *   'keep_collapsed' => bool
+ */
+PHP_METHOD(Geometry, makeValid)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    zval *params_val = NULL;
+    HashTable *params;
+    GEOS_PHP_ZVAL data;
+    zend_string *key;
+    zend_ulong index;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|a",
+            &params_val) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (!params_val || zend_hash_num_elements(HASH_OF(params_val)) == 0) {
+        ret = GEOSMakeValid_r(GEOS_G(handle), this);
+    } else {
+        GEOSMakeValidParams *mvp = GEOSMakeValidParams_create_r(GEOS_G(handle));
+        if (!mvp) RETURN_NULL();
+
+        params = HASH_OF(params_val);
+        zend_hash_internal_pointer_reset(params);
+        while (GEOS_PHP_HASH_GET_CUR_KEY(params, &key, &index)
+               == HASH_KEY_IS_STRING)
+        {
+            if (!strcmp(ZSTR_VAL(key), "method")) {
+                zval tmp;
+                int methodValue = GEOS_MAKE_VALID_LINEWORK;
+                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
+#if PHP_VERSION_ID >= 70000
+                tmp = *data;
+#else
+                tmp = **data;
+#endif
+                zval_copy_ctor(&tmp);
+                convert_to_string(&tmp);
+                if (!strcmp(Z_STRVAL(tmp), "structure")) {
+                    methodValue = GEOS_MAKE_VALID_STRUCTURE;
+                } else if (!strcmp(Z_STRVAL(tmp), "linework")) {
+                    methodValue = GEOS_MAKE_VALID_LINEWORK;
+                } else {
+                    zval_dtor(&tmp);
+                    GEOSMakeValidParams_destroy_r(GEOS_G(handle), mvp);
+                    zend_throw_exception_ex(
+                        zend_exception_get_default(TSRMLS_C), 1 TSRMLS_CC,
+                        "makeValid 'method' must be 'linework' or 'structure'");
+                    RETURN_NULL();
+                }
+                zval_dtor(&tmp);
+                GEOSMakeValidParams_setMethod_r(GEOS_G(handle), mvp,
+                    (enum GEOSMakeValidMethods)methodValue);
+            } else if (!strcmp(ZSTR_VAL(key), "keep_collapsed")) {
+                long bv;
+                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
+                bv = getZvalAsLong(data);
+                GEOSMakeValidParams_setKeepCollapsed_r(GEOS_G(handle), mvp,
+                    bv ? 1 : 0);
+            }
+            zend_hash_move_forward(params);
+        }
+
+        ret = GEOSMakeValidWithParams_r(GEOS_G(handle), this, mvp);
+        GEOSMakeValidParams_destroy_r(GEOS_G(handle), mvp);
+    }
+
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::concaveHull(float $ratio, bool $allowHoles = false)
+ */
+PHP_METHOD(Geometry, concaveHull)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double ratio;
+    zend_bool allowHoles = 0;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
+            &ratio, &allowHoles) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSConcaveHull_r(GEOS_G(handle), this, ratio, allowHoles ? 1 : 0);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::concaveHullByLength(float $maxLength, bool $allowHoles = false)
+ */
+PHP_METHOD(Geometry, concaveHullByLength)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double maxLength;
+    zend_bool allowHoles = 0;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
+            &maxLength, &allowHoles) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSConcaveHullByLength_r(GEOS_G(handle), this, maxLength,
+        allowHoles ? 1 : 0);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::concaveHullOfPolygons(float $ratio,
+ *   bool $isTight = true, bool $allowHoles = false)
+ */
+PHP_METHOD(Geometry, concaveHullOfPolygons)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double ratio;
+    zend_bool isTight = 1;
+    zend_bool allowHoles = 0;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|bb",
+            &ratio, &isTight, &allowHoles) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSConcaveHullOfPolygons_r(GEOS_G(handle), this, ratio,
+        isTight ? 1 : 0, allowHoles ? 1 : 0);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::polygonHullSimplify(bool $isOuter, float $param,
+ *   ?int $mode = null)
+ */
+PHP_METHOD(Geometry, polygonHullSimplify)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    zend_bool isOuter;
+    double param;
+    zval *modeZv = NULL;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "bd|z!",
+            &isOuter, &param, &modeZv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (modeZv && Z_TYPE_P(modeZv) != IS_NULL) {
+        long mode;
+        zval tmp;
+        tmp = *modeZv;
+        zval_copy_ctor(&tmp);
+        convert_to_long(&tmp);
+        mode = Z_LVAL(tmp);
+        zval_dtor(&tmp);
+        ret = GEOSPolygonHullSimplifyMode_r(GEOS_G(handle), this,
+            isOuter ? 1 : 0, (unsigned int)mode, param);
+    } else {
+        ret = GEOSPolygonHullSimplify_r(GEOS_G(handle), this,
+            isOuter ? 1 : 0, param);
+    }
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/* -- Item 8: Hull / metric extras -------------------- */
+
+PHP_METHOD(Geometry, minimumBoundingCircle)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    GEOSGeometry *center = NULL;
+    double radius = 0.0;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    /* GEOSMinimumBoundingCircle_r writes to radius and *center. We don't
+     * expose them here (GEOSGeometry::minimumBoundingCircle returns the
+     * circle geometry only); just destroy the center geom afterwards. */
+    ret = GEOSMinimumBoundingCircle_r(GEOS_G(handle), this, &radius, &center);
+    if (center) GEOSGeom_destroy_r(GEOS_G(handle), center);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, minimumRotatedRectangle)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSMinimumRotatedRectangle_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, minimumWidth)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSMinimumWidth_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, minimumClearance)
+{
+    GEOSGeometry *this;
+    double d;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    rc = GEOSMinimumClearance_r(GEOS_G(handle), this, &d);
+    if (rc != 0) RETURN_NULL();
+    RETURN_DOUBLE(d);
+}
+
+PHP_METHOD(Geometry, minimumClearanceLine)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSMinimumClearanceLine_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, maximumInscribedCircle)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double tol;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d", &tol) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSMaximumInscribedCircle_r(GEOS_G(handle), this, tol);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::largestEmptyCircle(float $tol, ?GEOSGeometry $boundary = null)
+ *
+ * Order matches the natural required-then-optional pattern.
+ */
+PHP_METHOD(Geometry, largestEmptyCircle)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    GEOSGeometry *boundary = NULL;
+    double tol;
+    zval *zobj = NULL;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|o!",
+            &tol, &zobj) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (zobj) boundary = getRelay(zobj, Geometry_ce_ptr);
+    ret = GEOSLargestEmptyCircle_r(GEOS_G(handle), this, boundary, tol);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/* -- Item 9: Distance / metric extras -------------------- */
+
+PHP_METHOD(Geometry, distanceWithin)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    double maxDist;
+    char ret;
+    zend_bool retBool;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
+            &zobj, &maxDist) == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    ret = GEOSDistanceWithin_r(GEOS_G(handle), this, other, maxDist);
+    if (ret == 2) RETURN_NULL();
+    retBool = ret;
+    RETURN_BOOL(retBool);
+}
+
+PHP_METHOD(Geometry, distanceIndexed)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    double dist;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+            == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    rc = GEOSDistanceIndexed_r(GEOS_G(handle), this, other, &dist);
+    if (rc != 1) RETURN_NULL();
+    RETURN_DOUBLE(dist);
+}
+
+/**
+ * GEOSGeometry::nearestPoints(GEOSGeometry $other) : GEOSCoordSeq
+ *
+ * GEOSNearestPoints_r returns a NEW coord-seq that the caller owns; we
+ * wrap it directly via setRelay (no clone) per CoordSeq lifecycle rule 1.
+ */
+PHP_METHOD(Geometry, nearestPoints)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    GEOSCoordSequence *cs;
+    zval *zobj;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+            == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    cs = GEOSNearestPoints_r(GEOS_G(handle), this, other);
+    if ( ! cs ) RETURN_NULL();
+
+    object_init_ex(return_value, CoordSeq_ce_ptr);
+    setRelay(return_value, cs);
+}
+
+PHP_METHOD(Geometry, frechetDistance)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    double dist;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+            == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    rc = GEOSFrechetDistance_r(GEOS_G(handle), this, other, &dist);
+    if (rc != 1) RETURN_NULL();
+    RETURN_DOUBLE(dist);
+}
+
+PHP_METHOD(Geometry, frechetDistanceDensify)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    double dist, frac;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
+            &zobj, &frac) == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    rc = GEOSFrechetDistanceDensify_r(GEOS_G(handle), this, other, frac, &dist);
+    if (rc != 1) RETURN_NULL();
+    RETURN_DOUBLE(dist);
+}
+
+PHP_METHOD(Geometry, hausdorffDistanceDensify)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    double dist, frac;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
+            &zobj, &frac) == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    rc = GEOSHausdorffDistanceDensify_r(GEOS_G(handle), this, other, frac, &dist);
+    if (rc != 1) RETURN_NULL();
+    RETURN_DOUBLE(dist);
+}
+
+/* -- Item 10: Linear referencing extras -------------------- */
+
+PHP_METHOD(Geometry, lineSubstring)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double startFrac, endFrac;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd",
+            &startFrac, &endFrac) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSLineSubstring_r(GEOS_G(handle), this, startFrac, endFrac);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, lineMergeDirected)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSLineMergeDirected_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/* -- Item 11: Construction / utility extras -------------------- */
+
+PHP_METHOD(Geometry, reverse)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    ret = GEOSReverse_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, densify)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double dist;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d", &dist) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSDensify_r(GEOS_G(handle), this, dist);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+PHP_METHOD(Geometry, removeRepeatedPoints)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    double tol = 0.0;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|d", &tol) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    ret = GEOSRemoveRepeatedPoints_r(GEOS_G(handle), this, tol);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
+/**
+ * GEOSGeometry::orientPolygons(bool $exterior_cw = false)
+ *
+ * Mutates a CLONE of the source geometry; returns the (oriented) clone.
+ * GEOSOrientPolygons_r operates in-place, so we clone first so the input
+ * geometry remains immutable from a PHP-API perspective.
+ */
+PHP_METHOD(Geometry, orientPolygons)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *clone;
+    zend_bool exterior_cw = 0;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|b",
+            &exterior_cw) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    clone = GEOSGeom_clone_r(GEOS_G(handle), this);
+    if ( ! clone ) RETURN_NULL();
+
+    rc = GEOSOrientPolygons_r(GEOS_G(handle), clone, exterior_cw ? 1 : 0);
+    if (rc < 0) {
+        GEOSGeom_destroy_r(GEOS_G(handle), clone);
+        RETURN_NULL();
+    }
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, clone);
+}
+
+PHP_METHOD(Geometry, equalsIdentical)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *other;
+    zval *zobj;
+    char ret;
+    zend_bool retBool;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+            == FAILURE) {
+        RETURN_NULL();
+    }
+    other = getRelay(zobj, Geometry_ce_ptr);
+
+    ret = GEOSEqualsIdentical_r(GEOS_G(handle), this, other);
+    if (ret == 2) RETURN_NULL();
+    retBool = ret;
+    RETURN_BOOL(retBool);
+}
+
+PHP_METHOD(Geometry, getXMin)
+{
+    GEOSGeometry *this;
+    double v;
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    if (GEOSGeom_getXMin_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
+    RETURN_DOUBLE(v);
+}
+
+PHP_METHOD(Geometry, getXMax)
+{
+    GEOSGeometry *this;
+    double v;
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    if (GEOSGeom_getXMax_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
+    RETURN_DOUBLE(v);
+}
+
+PHP_METHOD(Geometry, getYMin)
+{
+    GEOSGeometry *this;
+    double v;
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    if (GEOSGeom_getYMin_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
+    RETURN_DOUBLE(v);
+}
+
+PHP_METHOD(Geometry, getYMax)
+{
+    GEOSGeometry *this;
+    double v;
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    if (GEOSGeom_getYMax_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
+    RETURN_DOUBLE(v);
+}
+
+PHP_METHOD(Geometry, getExtent)
+{
+    GEOSGeometry *this;
+    double xmin, ymin, xmax, ymax;
+    int rc;
+
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    rc = GEOSGeom_getExtent_r(GEOS_G(handle), this,
+        &xmin, &ymin, &xmax, &ymax);
+    if (rc == 0) RETURN_NULL();
+
+    array_init(return_value);
+    add_assoc_double(return_value, "xmin", xmin);
+    add_assoc_double(return_value, "ymin", ymin);
+    add_assoc_double(return_value, "xmax", xmax);
+    add_assoc_double(return_value, "ymax", ymax);
+}
+
+PHP_METHOD(Geometry, buildArea)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *ret;
+    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+    ret = GEOSBuildArea_r(GEOS_G(handle), this);
+    if ( ! ret ) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, ret);
+}
+
 /* -- class GEOSCoordSeq -------------------- */
 
 /*
@@ -2483,7 +3279,7 @@ static zend_function_entry CoordSeq_methods[] = {
     {NULL, NULL, NULL}
 };
 
-static zend_class_entry *CoordSeq_ce_ptr;
+/* CoordSeq_ce_ptr is forward-declared near Geometry_ce_ptr. */
 
 static zend_object_handlers CoordSeq_object_handlers;
 
@@ -3197,10 +3993,12 @@ PHP_METHOD(Geometry, getCoordSeq)
 
 PHP_METHOD(WKTReader, __construct);
 PHP_METHOD(WKTReader, read);
+PHP_METHOD(WKTReader, setFixStructure);
 
 static zend_function_entry WKTReader_methods[] = {
     PHP_ME(WKTReader, __construct, arginfo_WKTReader_construct, 0)
     PHP_ME(WKTReader, read, arginfo_WKTReader_read, 0)
+    PHP_ME(WKTReader, setFixStructure, arginfo_WKTReader_setFixStructure, 0)
     {NULL, NULL, NULL}
 };
 
@@ -3281,6 +4079,20 @@ PHP_METHOD(WKTReader, read)
     object_init_ex(return_value, Geometry_ce_ptr);
     setRelay(return_value, geom);
 
+}
+
+PHP_METHOD(WKTReader, setFixStructure)
+{
+    GEOSWKTReader *reader;
+    zend_bool fix;
+
+    reader = (GEOSWKTReader*)getRelay(getThis(), WKTReader_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "b", &fix) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    GEOSWKTReader_setFixStructure_r(GEOS_G(handle), reader, fix ? 1 : 0);
 }
 
 /* -- class GEOSWKTWriter -------------------- */
@@ -3515,6 +4327,8 @@ PHP_METHOD(WKBWriter, setIncludeSRID);
 PHP_METHOD(WKBWriter, getIncludeSRID);
 PHP_METHOD(WKBWriter, write);
 PHP_METHOD(WKBWriter, writeHEX);
+PHP_METHOD(WKBWriter, setFlavor);
+PHP_METHOD(WKBWriter, getFlavor);
 
 static zend_function_entry WKBWriter_methods[] = {
     PHP_ME(WKBWriter, __construct, arginfo_WKBWriter_construct, 0)
@@ -3526,6 +4340,8 @@ static zend_function_entry WKBWriter_methods[] = {
     PHP_ME(WKBWriter, setIncludeSRID, arginfo_WKBWriter_setIncludeSRID, 0)
     PHP_ME(WKBWriter, write, arginfo_WKBWriter_write, 0)
     PHP_ME(WKBWriter, writeHEX, arginfo_WKBWriter_writeHEX, 0)
+    PHP_ME(WKBWriter, setFlavor, arginfo_WKBWriter_setFlavor, 0)
+    PHP_ME(WKBWriter, getFlavor, arginfo_WKBWriter_getFlavor, 0)
     {NULL, NULL, NULL}
 };
 
@@ -3749,16 +4565,47 @@ PHP_METHOD(WKBWriter, setIncludeSRID)
     GEOSWKBWriter_setIncludeSRID_r(GEOS_G(handle), writer, inc);
 }
 
+/**
+ * void GEOSWKBWriter::setFlavor(int flavor);
+ */
+PHP_METHOD(WKBWriter, setFlavor)
+{
+    GEOSWKBWriter *writer;
+    zend_long flavor;
+
+    writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &flavor) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    GEOSWKBWriter_setFlavor_r(GEOS_G(handle), writer, (int)flavor);
+}
+
+/**
+ * int GEOSWKBWriter::getFlavor();
+ */
+PHP_METHOD(WKBWriter, getFlavor)
+{
+    GEOSWKBWriter *writer;
+    int ret;
+    writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
+    ret = GEOSWKBWriter_getFlavor_r(GEOS_G(handle), writer);
+    RETURN_LONG(ret);
+}
+
 /* -- class GEOSWKBReader -------------------- */
 
 PHP_METHOD(WKBReader, __construct);
 PHP_METHOD(WKBReader, read);
 PHP_METHOD(WKBReader, readHEX);
+PHP_METHOD(WKBReader, setFixStructure);
 
 static zend_function_entry WKBReader_methods[] = {
     PHP_ME(WKBReader, __construct, arginfo_WKBReader_construct, 0)
     PHP_ME(WKBReader, read, arginfo_WKBReader_read, 0)
     PHP_ME(WKBReader, readHEX, arginfo_WKBReader_readHEX, 0)
+    PHP_ME(WKBReader, setFixStructure, arginfo_WKBReader_setFixStructure, 0)
     {NULL, NULL, NULL}
 };
 
@@ -3871,6 +4718,20 @@ PHP_METHOD(WKBReader, readHEX)
 
 }
 
+PHP_METHOD(WKBReader, setFixStructure)
+{
+    GEOSWKBReader *reader;
+    zend_bool fix;
+
+    reader = (GEOSWKBReader*)getRelay(getThis(), WKBReader_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "b", &fix) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    GEOSWKBReader_setFixStructure_r(GEOS_G(handle), reader, fix ? 1 : 0);
+}
+
 
 /* -- Free functions ------------------------- */
 
@@ -3955,6 +4816,109 @@ PHP_FUNCTION(GEOSPolygonize)
     GEOSGeom_destroy_r(GEOS_G(handle), invalid_rings);
     GEOS_PHP_ADD_ASSOC_ZVAL(return_value, "invalid_rings", array_elem);
 
+}
+
+/**
+ * array GEOSPolygonizeValid(GEOSGeometry $geom)
+ *
+ * Returns an array of valid polygons formed from the linework of the input.
+ */
+PHP_FUNCTION(GEOSPolygonizeValid)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *out;
+    const GEOSGeometry *input[1];
+    zval *zobj;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+        == FAILURE)
+    {
+        RETURN_NULL();
+    }
+    this = getRelay(zobj, Geometry_ce_ptr);
+    input[0] = this;
+
+    out = GEOSPolygonize_valid_r(GEOS_G(handle), input, 1);
+    if ( ! out ) RETURN_NULL();
+
+    array_init(return_value);
+    dumpGeometry(out, return_value);
+    GEOSGeom_destroy_r(GEOS_G(handle), out);
+}
+
+/**
+ * array GEOSPolygonizeCutEdges(GEOSGeometry $geom)
+ *
+ * Returns an array of "cut" edges (edges connected at both ends but not
+ * forming part of any polygon).
+ */
+PHP_FUNCTION(GEOSPolygonizeCutEdges)
+{
+    GEOSGeometry *this;
+    GEOSGeometry *out;
+    const GEOSGeometry *input[1];
+    zval *zobj;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+        == FAILURE)
+    {
+        RETURN_NULL();
+    }
+    this = getRelay(zobj, Geometry_ce_ptr);
+    input[0] = this;
+
+    out = GEOSPolygonizer_getCutEdges_r(GEOS_G(handle), input, 1);
+    if ( ! out ) RETURN_NULL();
+
+    array_init(return_value);
+    dumpGeometry(out, return_value);
+    GEOSGeom_destroy_r(GEOS_G(handle), out);
+}
+
+/**
+ * GEOSGeometry GEOSBuildArea(GEOSGeometry $geom)
+ */
+PHP_FUNCTION(GEOSBuildArea)
+{
+    GEOSGeometry *geom_in;
+    GEOSGeometry *geom_out;
+    zval *zobj;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+        == FAILURE)
+    {
+        RETURN_NULL();
+    }
+    geom_in = getRelay(zobj, Geometry_ce_ptr);
+
+    geom_out = GEOSBuildArea_r(GEOS_G(handle), geom_in);
+    if ( ! geom_out ) RETURN_NULL();
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, geom_out);
+}
+
+/**
+ * GEOSGeometry GEOSDisjointSubsetUnion(GEOSGeometry $geom)
+ */
+PHP_FUNCTION(GEOSDisjointSubsetUnion)
+{
+    GEOSGeometry *geom_in;
+    GEOSGeometry *geom_out;
+    zval *zobj;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+        == FAILURE)
+    {
+        RETURN_NULL();
+    }
+    geom_in = getRelay(zobj, Geometry_ce_ptr);
+
+    geom_out = GEOSDisjointSubsetUnion_r(GEOS_G(handle), geom_in);
+    if ( ! geom_out ) RETURN_NULL();
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, geom_out);
 }
 
 /**
@@ -4246,6 +5210,25 @@ PHP_MINIT_FUNCTION(geos)
     REGISTER_LONG_CONSTANT("GEOS_PREC_KEEP_COLLAPSED", GEOS_PREC_KEEP_COLLAPSED,
         CONST_CS|CONST_PERSISTENT);
 #   endif
+
+    /* Item 3: MakeValid methods */
+    REGISTER_LONG_CONSTANT("GEOS_MAKE_VALID_LINEWORK", GEOS_MAKE_VALID_LINEWORK,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_MAKE_VALID_STRUCTURE", GEOS_MAKE_VALID_STRUCTURE,
+        CONST_CS|CONST_PERSISTENT);
+
+    /* Item 4: PolygonHullSimplify modes — names per implementation plan,
+     * values from GEOSPolygonHullParameterModes in geos_c.h. */
+    REGISTER_LONG_CONSTANT("GEOS_HULL_PARAM_VERTEX_NUM_FRACTION",
+        GEOSHULL_PARAM_VERTEX_RATIO, CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_HULL_PARAM_AREA_DELTA_RATIO",
+        GEOSHULL_PARAM_AREA_RATIO, CONST_CS|CONST_PERSISTENT);
+
+    /* Item 7: WKB flavors */
+    REGISTER_LONG_CONSTANT("GEOSWKB_EXTENDED", GEOS_WKB_EXTENDED,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOSWKB_ISO", GEOS_WKB_ISO,
+        CONST_CS|CONST_PERSISTENT);
 
     REGISTER_LONG_CONSTANT("GEOSRELATE_BNR_MOD2", GEOSRELATE_BNR_MOD2,
         CONST_CS|CONST_PERSISTENT);
