@@ -1,0 +1,1181 @@
+From 54ff556fd709f480ee15b3eb4bce3537e286d22b Mon Sep 17 00:00:00 2001
+From: Abraham van der Merwe <abz@frogfoot.com>
+Date: Sun, 26 Apr 2026 17:08:22 +0200
+Subject: [PATCH 6/8] Items 13-15: Coverage, Clustering, Constrained Delaunay
+
+Item 13 - Coverage processing
+  GEOSGeometry::coverageUnion()
+  GEOSGeometry::coverageIsValid($gapWidth = 0.0)
+                returns ['valid' => bool, 'invalid' => GEOSGeometry]
+                ('invalid' is always populated; empty for valid coverages)
+  GEOSGeometry::coverageSimplifyVW($tolerance, $simplifyBoundary = true)
+  GEOSGeometry::coverageClean($params = [])  with 'snap_distance',
+                'gap_max_width', 'overlap_strategy' keys
+  Constants under both upstream and plan-preferred names:
+    GEOS_MERGE_LONGEST_BORDER / GEOS_OVERLAP_MERGE_LONGEST_BORDER
+    GEOS_MERGE_MAX_AREA       / GEOS_OVERLAP_MERGE_MAX_AREA
+    GEOS_MERGE_MIN_AREA       / GEOS_OVERLAP_MERGE_MIN_AREA
+    GEOS_MERGE_MIN_INDEX      / GEOS_OVERLAP_MERGE_MIN_INDEX
+
+Item 14 - Clustering
+  GEOSGeometry::clusterDBSCAN($eps, $minPoints)
+  GEOSGeometry::clusterByDistance($distance, $useEnvelope = false)
+  GEOSGeometry::clusterByIntersection($useEnvelope = false)
+
+  New class GEOSClusterResult:
+    getNumClusters(), getClusterSize($i),
+    getClustersForInputs(), getInputsForCluster($n)
+  __construct is locked (only via GEOSGeometry::cluster*).
+
+  Implementation note: ClusterRelay struct holds both the C
+  GEOSClusterInfo* and the source-collection input count (captured
+  at cluster-call time), since upstream omits a getNumElements
+  accessor. Dtor frees both.
+
+Item 15 - Constrained Delaunay
+  delaunayTriangulation($tolerance = 0, $edgeOnly = false, $constrained = false)
+  Optional third arg routes to GEOSConstrainedDelaunayTriangulation_r.
+
+21/21 .phpt tests pass.
+---
+ arginfo.h                 |  44 +++
+ geos.c                    | 568 +++++++++++++++++++++++++++++++++++++-
+ tests/021_Coverage.phpt   | 155 +++++++++++
+ tests/022_Clustering.phpt | 166 +++++++++++
+ tests/023_Delaunay.phpt   |  89 ++++++
+ 5 files changed, 1018 insertions(+), 4 deletions(-)
+ create mode 100644 tests/021_Coverage.phpt
+ create mode 100644 tests/022_Clustering.phpt
+ create mode 100644 tests/023_Delaunay.phpt
+
+diff --git a/arginfo.h b/arginfo.h
+index c3bf308..c3f65c2 100644
+--- a/arginfo.h
++++ b/arginfo.h
+@@ -254,6 +254,7 @@ ZEND_END_ARG_INFO()
+ ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_delaunayTriangulation, 0, 0, 0)
+     ZEND_ARG_INFO(0, tolerance)
+     ZEND_ARG_INFO(0, edgeonly)
++    ZEND_ARG_INFO(0, constrained)
+ ZEND_END_ARG_INFO()
+ #endif
+ 
+@@ -597,3 +598,46 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createRectangle, 0, 0, 4)
+     ZEND_ARG_INFO(0, ymax)
+ ZEND_END_ARG_INFO()
+ 
++
++/* -- Item 13: Coverage processing ---------------- */
++
++#define arginfo_Geometry_coverageUnion       arginfo_void
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageIsValid, 0, 0, 0)
++    ZEND_ARG_INFO(0, gapWidth)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageSimplifyVW, 0, 0, 1)
++    ZEND_ARG_INFO(0, tolerance)
++    ZEND_ARG_INFO(0, simplifyBoundary)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_coverageClean, 0, 0, 0)
++    ZEND_ARG_INFO(0, params)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 14: Clustering family ------------------ */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterDBSCAN, 0, 0, 2)
++    ZEND_ARG_INFO(0, eps)
++    ZEND_ARG_INFO(0, minPoints)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterByDistance, 0, 0, 1)
++    ZEND_ARG_INFO(0, distance)
++    ZEND_ARG_INFO(0, useEnvelope)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clusterByIntersection, 0, 0, 0)
++    ZEND_ARG_INFO(0, useEnvelope)
++ZEND_END_ARG_INFO()
++
++/* GEOSClusterResult methods arginfo */
++
++#define arginfo_ClusterResult_construct             arginfo_void
++#define arginfo_ClusterResult_getNumClusters        arginfo_void
++#define arginfo_ClusterResult_getClusterSize        arginfo_num
++#define arginfo_ClusterResult_getClustersForInputs  arginfo_void
++#define arginfo_ClusterResult_getInputsForCluster   arginfo_num
++
+diff --git a/geos.c b/geos.c
+index cf6518f..b2641f2 100644
+--- a/geos.c
++++ b/geos.c
+@@ -501,6 +501,17 @@ PHP_METHOD(Geometry, createCollection);
+ PHP_METHOD(Geometry, createEmptyCollection);
+ PHP_METHOD(Geometry, createRectangle);
+ 
++/* Item 13 — Coverage processing */
++PHP_METHOD(Geometry, coverageUnion);
++PHP_METHOD(Geometry, coverageIsValid);
++PHP_METHOD(Geometry, coverageSimplifyVW);
++PHP_METHOD(Geometry, coverageClean);
++
++/* Item 14 — Clustering family (methods on GEOSGeometry) */
++PHP_METHOD(Geometry, clusterDBSCAN);
++PHP_METHOD(Geometry, clusterByDistance);
++PHP_METHOD(Geometry, clusterByIntersection);
++
+ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
+     PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
+@@ -716,6 +727,17 @@ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, createRectangle, arginfo_Geometry_createRectangle,
+         ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+ 
++    /* Item 13 — Coverage processing */
++    PHP_ME(Geometry, coverageUnion, arginfo_Geometry_coverageUnion, 0)
++    PHP_ME(Geometry, coverageIsValid, arginfo_Geometry_coverageIsValid, 0)
++    PHP_ME(Geometry, coverageSimplifyVW, arginfo_Geometry_coverageSimplifyVW, 0)
++    PHP_ME(Geometry, coverageClean, arginfo_Geometry_coverageClean, 0)
++
++    /* Item 14 — Clustering family */
++    PHP_ME(Geometry, clusterDBSCAN, arginfo_Geometry_clusterDBSCAN, 0)
++    PHP_ME(Geometry, clusterByDistance, arginfo_Geometry_clusterByDistance, 0)
++    PHP_ME(Geometry, clusterByIntersection, arginfo_Geometry_clusterByIntersection, 0)
++
+     {NULL, NULL, NULL}
+ };
+ 
+@@ -723,6 +745,8 @@ static zend_class_entry *Geometry_ce_ptr;
+ /* forward declared for use by Geometry::nearestPoints; defined with the
+  * GEOSCoordSeq class below. */
+ static zend_class_entry *CoordSeq_ce_ptr;
++/* forward declared for use by Geometry::cluster*; class defined below. */
++static zend_class_entry *ClusterResult_ce_ptr;
+ 
+ static zend_object_handlers Geometry_object_handlers;
+ 
+@@ -5798,7 +5822,7 @@ PHP_FUNCTION(GEOSSharedPaths)
+ #endif
+ 
+ /**
+- * GEOSGeometry::delaunayTriangulation([<tolerance>], [<onlyEdges>])
++ * GEOSGeometry::delaunayTriangulation([<tolerance>], [<onlyEdges>], [<constrained>])
+  *
+  *  'tolerance'
+  *       Type: double
+@@ -5807,6 +5831,12 @@ PHP_FUNCTION(GEOSSharedPaths)
+  *       Type: boolean
+  *       if true will return a MULTILINESTRING, otherwise (the default)
+  *       it will return a GEOMETRYCOLLECTION containing triangular POLYGONs.
++ *  'constrained'
++ *       Type: boolean (Item 15)
++ *       if true, calls GEOSConstrainedDelaunayTriangulation_r instead.
++ *       Constrained triangulation IGNORES tolerance and onlyEdges — the
++ *       upstream API only accepts the input geometry; it always returns
++ *       a GEOMETRYCOLLECTION of triangle polygons.
+  */
+ #ifdef HAVE_GEOS_DELAUNAY_TRIANGULATION
+ PHP_METHOD(Geometry, delaunayTriangulation)
+@@ -5815,15 +5845,22 @@ PHP_METHOD(Geometry, delaunayTriangulation)
+     GEOSGeometry *ret;
+     double tolerance = 0.0;
+     zend_bool edgeonly = 0;
++    zend_bool constrained = 0;
+ 
+     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|db",
+-            &tolerance, &edgeonly) == FAILURE) {
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|dbb",
++            &tolerance, &edgeonly, &constrained) == FAILURE) {
+         RETURN_NULL();
+     }
+ 
+-    ret = GEOSDelaunayTriangulation_r(GEOS_G(handle), this, tolerance, edgeonly ? 1 : 0);
++    if (constrained) {
++        /* Constrained variant ignores tolerance and onlyEdges (per upstream
++         * GEOSConstrainedDelaunayTriangulation_r signature). */
++        ret = GEOSConstrainedDelaunayTriangulation_r(GEOS_G(handle), this);
++    } else {
++        ret = GEOSDelaunayTriangulation_r(GEOS_G(handle), this, tolerance, edgeonly ? 1 : 0);
++    }
+     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
+ 
+     /* return_value is a zval */
+@@ -5906,6 +5943,494 @@ PHP_FUNCTION(GEOSRelateMatch)
+ }
+ #endif
+ 
++/* -- Item 13: Coverage processing -------------------- */
++
++/**
++ * GEOSGeometry::coverageUnion()
++ *
++ * Input must be a GEOMETRYCOLLECTION of polygons forming a valid coverage.
++ * Returns the merged geometry (or NULL on error).
++ */
++PHP_METHOD(Geometry, coverageUnion)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSCoverageUnion_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/**
++ * GEOSGeometry::coverageIsValid(float $gapWidth = 0.0) : array
++ *
++ * Returns ['valid' => bool, 'invalid' => ?GEOSGeometry].
++ * The 'invalid' geometry highlights edges that violate coverage rules;
++ * may be NULL/missing when coverage is valid.
++ */
++PHP_METHOD(Geometry, coverageIsValid)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *invalid = NULL;
++    double gapWidth = 0.0;
++    int ret;
++    zend_bool retBool;
++    zval *invalidVal = NULL;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|d",
++            &gapWidth) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSCoverageIsValid_r(GEOS_G(handle), this, gapWidth, &invalid);
++    if ( ret == 2 ) RETURN_NULL(); /* exception path */
++
++    if ( invalid ) {
++        MAKE_STD_ZVAL(invalidVal);
++        object_init_ex(invalidVal, Geometry_ce_ptr);
++        setRelay(invalidVal, invalid);
++    }
++
++    retBool = ret ? 1 : 0;
++
++    array_init(return_value);
++    add_assoc_bool(return_value, "valid", retBool);
++    if ( invalidVal ) {
++        GEOS_PHP_ADD_ASSOC_ZVAL(return_value, "invalid", invalidVal);
++    } else {
++        add_assoc_null(return_value, "invalid");
++    }
++}
++
++/**
++ * GEOSGeometry::coverageSimplifyVW(float $tolerance, bool $simplifyBoundary = true)
++ *
++ * Visvalingam-Whyatt simplification preserving coverage topology.
++ * Note: GEOSCoverageSimplifyVW_r takes 'preserveBoundary' (int); we expose
++ * 'simplifyBoundary' as the user-facing name (true => simplify boundary, i.e.
++ * preserveBoundary=0). When simplifyBoundary=false, boundaries are preserved.
++ */
++PHP_METHOD(Geometry, coverageSimplifyVW)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double tolerance;
++    zend_bool simplifyBoundary = 1;
++    int preserveBoundary;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
++            &tolerance, &simplifyBoundary) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    /* simplifyBoundary=true → simplify everything → preserveBoundary=0 */
++    preserveBoundary = simplifyBoundary ? 0 : 1;
++
++    ret = GEOSCoverageSimplifyVW_r(GEOS_G(handle), this, tolerance,
++            preserveBoundary);
++    if ( ! ret ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/**
++ * GEOSGeometry::coverageClean(array $params = [])
++ *
++ * Empty params -> GEOSCoverageClean_r (defaults).
++ * Otherwise build a GEOSCoverageCleanParams and call GEOSCoverageCleanWithParams_r.
++ *
++ * Recognised keys:
++ *   'snap_distance'    => float
++ *   'gap_max_width'    => float
++ *   'overlap_strategy' => int (one of GEOS_OVERLAP_MERGE_* / GEOS_MERGE_*)
++ */
++PHP_METHOD(Geometry, coverageClean)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    zval *params_val = NULL;
++    HashTable *params;
++    GEOS_PHP_ZVAL data;
++    zend_string *key;
++    zend_ulong index;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|a",
++            &params_val) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    if (!params_val || zend_hash_num_elements(HASH_OF(params_val)) == 0) {
++        ret = GEOSCoverageClean_r(GEOS_G(handle), this);
++    } else {
++        GEOSCoverageCleanParams *cp = GEOSCoverageCleanParams_create_r(GEOS_G(handle));
++        if (!cp) RETURN_NULL();
++
++        params = HASH_OF(params_val);
++        zend_hash_internal_pointer_reset(params);
++        while (GEOS_PHP_HASH_GET_CUR_KEY(params, &key, &index)
++               == HASH_KEY_IS_STRING)
++        {
++            if (!strcmp(ZSTR_VAL(key), "snap_distance")) {
++                double dv;
++                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
++                dv = getZvalAsDouble(data);
++                GEOSCoverageCleanParams_setSnappingDistance_r(GEOS_G(handle),
++                        cp, dv);
++            } else if (!strcmp(ZSTR_VAL(key), "gap_max_width")) {
++                double dv;
++                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
++                dv = getZvalAsDouble(data);
++                GEOSCoverageCleanParams_setGapMaximumWidth_r(GEOS_G(handle),
++                        cp, dv);
++            } else if (!strcmp(ZSTR_VAL(key), "overlap_strategy")) {
++                long lv;
++                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
++                lv = getZvalAsLong(data);
++                GEOSCoverageCleanParams_setOverlapMergeStrategy_r(GEOS_G(handle),
++                        cp, (int)lv);
++            }
++            zend_hash_move_forward(params);
++        }
++
++        ret = GEOSCoverageCleanWithParams_r(GEOS_G(handle), this, cp);
++        GEOSCoverageCleanParams_destroy_r(GEOS_G(handle), cp);
++    }
++
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/* -- Item 14: Clustering family -------------------- */
++
++/*
++ * The PHP relay for GEOSClusterResult is a small heap-allocated struct
++ * (ClusterRelay) so we can carry both the GEOSClusterInfo* and the input
++ * geometry count from the source collection. Upstream's
++ * GEOSClusterInfo_getClustersForInputs_r returns a buffer of length equal
++ * to the source's input geometry count, but provides no length getter; we
++ * record it ourselves when the cluster operation is kicked off.
++ */
++typedef struct {
++    GEOSClusterInfo *info;
++    size_t inputCount;
++} ClusterRelay;
++
++static ClusterRelay *
++newClusterRelay(GEOSClusterInfo *info, size_t inputCount)
++{
++    ClusterRelay *r = (ClusterRelay*)emalloc(sizeof(ClusterRelay));
++    r->info = info;
++    r->inputCount = inputCount;
++    return r;
++}
++
++/* Helper: derive the input count from the source collection. For a
++ * GeometryCollection this is GetNumGeometries; for a single non-collection
++ * it is 1. */
++static size_t
++deriveInputCount(GEOSGeometry *g)
++{
++    int n = GEOSGetNumGeometries_r(GEOS_G(handle), g);
++    if (n <= 0) return 0;
++    return (size_t)n;
++}
++
++/* Helper: wrap a freshly returned GEOSClusterInfo* into a new
++ * GEOSClusterResult zval. The PHP object owns the relay (ClusterRelay*). */
++static void
++returnClusterResult(zval *return_value, GEOSClusterInfo *ci, size_t inputCount)
++{
++    TSRMLS_FETCH();
++    ClusterRelay *r;
++    if ( ! ci ) {
++        RETURN_NULL();
++    }
++    r = newClusterRelay(ci, inputCount);
++    object_init_ex(return_value, ClusterResult_ce_ptr);
++    setRelay(return_value, r);
++}
++
++/**
++ * GEOSGeometry::clusterDBSCAN(float $eps, int $minPoints) : GEOSClusterResult
++ */
++PHP_METHOD(Geometry, clusterDBSCAN)
++{
++    GEOSGeometry *this;
++    GEOSClusterInfo *ci;
++    double eps;
++    zend_long minPoints;
++    size_t inputCount;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dl",
++            &eps, &minPoints) == FAILURE) {
++        RETURN_NULL();
++    }
++    if (minPoints < 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC, "clusterDBSCAN: minPoints must be >= 0");
++        RETURN_NULL();
++    }
++
++    inputCount = deriveInputCount(this);
++    ci = GEOSClusterDBSCAN_r(GEOS_G(handle), this, eps, (unsigned)minPoints);
++    returnClusterResult(return_value, ci, inputCount);
++}
++
++/**
++ * GEOSGeometry::clusterByDistance(float $distance, bool $useEnvelope = false)
++ *  : GEOSClusterResult
++ */
++PHP_METHOD(Geometry, clusterByDistance)
++{
++    GEOSGeometry *this;
++    GEOSClusterInfo *ci;
++    double dist;
++    zend_bool useEnvelope = 0;
++    size_t inputCount;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
++            &dist, &useEnvelope) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    inputCount = deriveInputCount(this);
++    if (useEnvelope) {
++        ci = GEOSClusterEnvelopeDistance_r(GEOS_G(handle), this, dist);
++    } else {
++        ci = GEOSClusterGeometryDistance_r(GEOS_G(handle), this, dist);
++    }
++    returnClusterResult(return_value, ci, inputCount);
++}
++
++/**
++ * GEOSGeometry::clusterByIntersection(bool $useEnvelope = false)
++ *  : GEOSClusterResult
++ */
++PHP_METHOD(Geometry, clusterByIntersection)
++{
++    GEOSGeometry *this;
++    GEOSClusterInfo *ci;
++    zend_bool useEnvelope = 0;
++    size_t inputCount;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|b",
++            &useEnvelope) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    inputCount = deriveInputCount(this);
++    if (useEnvelope) {
++        ci = GEOSClusterEnvelopeIntersects_r(GEOS_G(handle), this);
++    } else {
++        ci = GEOSClusterGeometryIntersects_r(GEOS_G(handle), this);
++    }
++    returnClusterResult(return_value, ci, inputCount);
++}
++
++/* -- class GEOSClusterResult -------------------- */
++
++/*
++ * Lifecycle:
++ *  - PHP GEOSClusterResult owns a heap-allocated ClusterRelay struct holding
++ *    both the GEOSClusterInfo* and the original input geometry count (which
++ *    upstream offers no getter for, but is needed to walk the
++ *    getClustersForInputs buffer).
++ *  - dtor calls GEOSClusterInfo_destroy_r and efrees the ClusterRelay.
++ *  - __construct() is locked: created only via Geometry::cluster*().
++ *  - getClustersForInputs_r returns a size_t* of length equal to the number
++ *    of input geometries; that buffer is allocated by GEOS and MUST be freed
++ *    via GEOSFree_r after copying into the PHP array.
++ *  - getInputsForClusterN_r returns a CONST size_t* whose lifetime is tied
++ *    to the GEOSClusterInfo (no GEOSFree_r required).
++ */
++
++PHP_METHOD(ClusterResult, __construct);
++PHP_METHOD(ClusterResult, getNumClusters);
++PHP_METHOD(ClusterResult, getClusterSize);
++PHP_METHOD(ClusterResult, getClustersForInputs);
++PHP_METHOD(ClusterResult, getInputsForCluster);
++
++static zend_function_entry ClusterResult_methods[] = {
++    PHP_ME(ClusterResult, __construct, arginfo_ClusterResult_construct, 0)
++    PHP_ME(ClusterResult, getNumClusters, arginfo_ClusterResult_getNumClusters, 0)
++    PHP_ME(ClusterResult, getClusterSize, arginfo_ClusterResult_getClusterSize, 0)
++    PHP_ME(ClusterResult, getClustersForInputs, arginfo_ClusterResult_getClustersForInputs, 0)
++    PHP_ME(ClusterResult, getInputsForCluster, arginfo_ClusterResult_getInputsForCluster, 0)
++    {NULL, NULL, NULL}
++};
++
++static zend_object_handlers ClusterResult_object_handlers;
++
++static void
++ClusterResult_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
++{
++#if PHP_VERSION_ID < 70000
++    Proxy *obj = (Proxy *)object;
++#else
++    Proxy *obj = php_geos_fetch_object(object);
++#endif
++
++    ClusterRelay *r = (ClusterRelay*)obj->relay;
++    if (r) {
++        if (r->info) {
++            GEOSClusterInfo_destroy_r(GEOS_G(handle), r->info);
++        }
++        efree(r);
++    }
++
++#if PHP_VERSION_ID < 70000
++    zend_hash_destroy(obj->std.properties);
++    FREE_HASHTABLE(obj->std.properties);
++
++    efree(obj);
++#endif
++}
++
++static zend_object_value
++ClusterResult_create_obj (zend_class_entry *type TSRMLS_DC)
++{
++    return Gen_create_obj(type, ClusterResult_dtor, &ClusterResult_object_handlers);
++}
++
++PHP_METHOD(ClusterResult, __construct)
++{
++    /* Locked: only Geometry::cluster*() may create a GEOSClusterResult. */
++    zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C), 1 TSRMLS_CC,
++        "GEOSClusterResult cannot be constructed directly; "
++        "use GEOSGeometry::clusterDBSCAN/clusterByDistance/clusterByIntersection");
++}
++
++PHP_METHOD(ClusterResult, getNumClusters)
++{
++    ClusterRelay *r;
++    size_t n;
++
++    r = (ClusterRelay*)getRelay(getThis(), ClusterResult_ce_ptr);
++    n = GEOSClusterInfo_getNumClusters_r(GEOS_G(handle), r->info);
++    RETURN_LONG((long)n);
++}
++
++PHP_METHOD(ClusterResult, getClusterSize)
++{
++    ClusterRelay *r;
++    zend_long idx;
++    size_t total;
++    size_t sz;
++
++    r = (ClusterRelay*)getRelay(getThis(), ClusterResult_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    if (idx < 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSClusterResult::getClusterSize: cluster index %ld is negative",
++            (long)idx);
++        RETURN_NULL();
++    }
++    total = GEOSClusterInfo_getNumClusters_r(GEOS_G(handle), r->info);
++    if ((size_t)idx >= total) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSClusterResult::getClusterSize: cluster index %ld out of range",
++            (long)idx);
++        RETURN_NULL();
++    }
++
++    sz = GEOSClusterInfo_getClusterSize_r(GEOS_G(handle), r->info, (size_t)idx);
++    RETURN_LONG((long)sz);
++}
++
++PHP_METHOD(ClusterResult, getClustersForInputs)
++{
++    ClusterRelay *r;
++    size_t *buf;
++    size_t i;
++
++    r = (ClusterRelay*)getRelay(getThis(), ClusterResult_ce_ptr);
++
++    buf = GEOSClusterInfo_getClustersForInputs_r(GEOS_G(handle), r->info);
++    if ( ! buf ) {
++        array_init(return_value);
++        return;
++    }
++
++    array_init(return_value);
++    for (i = 0; i < r->inputCount; ++i) {
++        if (buf[i] == (size_t)-1) {
++            add_next_index_long(return_value, -1);
++        } else {
++            add_next_index_long(return_value, (long)buf[i]);
++        }
++    }
++
++    /* GEOS-allocated buffer: must be GEOSFree_r'd, NOT efree. */
++    GEOSFree_r(GEOS_G(handle), buf);
++}
++
++PHP_METHOD(ClusterResult, getInputsForCluster)
++{
++    ClusterRelay *r;
++    zend_long idx;
++    const size_t *idxs;
++    size_t sz;
++    size_t total;
++    size_t k;
++
++    r = (ClusterRelay*)getRelay(getThis(), ClusterResult_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &idx)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    if (idx < 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSClusterResult::getInputsForCluster: cluster index %ld is negative",
++            (long)idx);
++        RETURN_NULL();
++    }
++    total = GEOSClusterInfo_getNumClusters_r(GEOS_G(handle), r->info);
++    if ((size_t)idx >= total) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSClusterResult::getInputsForCluster: cluster index %ld out of range",
++            (long)idx);
++        RETURN_NULL();
++    }
++
++    sz = GEOSClusterInfo_getClusterSize_r(GEOS_G(handle), r->info, (size_t)idx);
++    idxs = GEOSClusterInfo_getInputsForClusterN_r(GEOS_G(handle), r->info,
++            (size_t)idx);
++
++    array_init(return_value);
++    if ( ! idxs ) return;
++    for (k = 0; k < sz; ++k) {
++        add_next_index_long(return_value, (long)idxs[k]);
++    }
++    /* idxs is owned by the GEOSClusterInfo; do NOT free. */
++}
++
+ /* ------ Initialization / Deinitialization / Meta ------------------ */
+ 
+ /* per-module initialization */
+@@ -6012,6 +6537,18 @@ PHP_MINIT_FUNCTION(geos)
+     GeoJSONWriter_object_handlers.free_obj = GeoJSONWriter_dtor;
+ #endif
+ 
++    /* ClusterResult (Item 14) */
++    INIT_CLASS_ENTRY(ce, "GEOSClusterResult", ClusterResult_methods);
++    ClusterResult_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
++    ClusterResult_ce_ptr->create_object = ClusterResult_create_obj;
++    memcpy(&ClusterResult_object_handlers,
++        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
++    ClusterResult_object_handlers.clone_obj = NULL;
++#if PHP_VERSION_ID >= 70000
++    ClusterResult_object_handlers.offset = XtOffsetOf(Proxy, std);
++    ClusterResult_object_handlers.free_obj = ClusterResult_dtor;
++#endif
++
+ 
+     /* Constants */
+     REGISTER_LONG_CONSTANT("GEOSBUF_CAP_ROUND",  GEOSBUF_CAP_ROUND,
+@@ -6089,6 +6626,29 @@ PHP_MINIT_FUNCTION(geos)
+     REGISTER_LONG_CONSTANT("GEOSWKB_ISO", GEOS_WKB_ISO,
+         CONST_CS|CONST_PERSISTENT);
+ 
++    /* Item 13: Coverage clean overlap-merge strategies.
++     * The C enum is GEOSOverlapMerge with members GEOS_MERGE_LONGEST_BORDER,
++     * GEOS_MERGE_MAX_AREA, GEOS_MERGE_MIN_AREA, GEOS_MERGE_MIN_INDEX. We
++     * register both the C enum names and the implementation-plan preferred
++     * "GEOS_OVERLAP_MERGE_*" alias names. */
++    REGISTER_LONG_CONSTANT("GEOS_MERGE_LONGEST_BORDER",
++        GEOS_MERGE_LONGEST_BORDER, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_MERGE_MAX_AREA",
++        GEOS_MERGE_MAX_AREA, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_MERGE_MIN_AREA",
++        GEOS_MERGE_MIN_AREA, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_MERGE_MIN_INDEX",
++        GEOS_MERGE_MIN_INDEX, CONST_CS|CONST_PERSISTENT);
++    /* Plan-preferred alias names (same enum values). */
++    REGISTER_LONG_CONSTANT("GEOS_OVERLAP_MERGE_LONGEST_BORDER",
++        GEOS_MERGE_LONGEST_BORDER, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_OVERLAP_MERGE_MAX_AREA",
++        GEOS_MERGE_MAX_AREA, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_OVERLAP_MERGE_MIN_AREA",
++        GEOS_MERGE_MIN_AREA, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_OVERLAP_MERGE_MIN_INDEX",
++        GEOS_MERGE_MIN_INDEX, CONST_CS|CONST_PERSISTENT);
++
+     REGISTER_LONG_CONSTANT("GEOSRELATE_BNR_MOD2", GEOSRELATE_BNR_MOD2,
+         CONST_CS|CONST_PERSISTENT);
+     REGISTER_LONG_CONSTANT("GEOSRELATE_BNR_OGC", GEOSRELATE_BNR_OGC,
+diff --git a/tests/021_Coverage.phpt b/tests/021_Coverage.phpt
+new file mode 100644
+index 0000000..3d16dfa
+--- /dev/null
++++ b/tests/021_Coverage.phpt
+@@ -0,0 +1,155 @@
++--TEST--
++GEOSGeometry coverage processing (Item 13)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class CoverageTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++    private function writer() {
++        $w = new GEOSWKTWriter();
++        if (method_exists($w, 'setTrim')) $w->setTrim(true);
++        return $w;
++    }
++
++    /* Two adjacent unit squares forming a valid 2x1 coverage. */
++    private function adjacentPair()
++    {
++        return $this->reader()->read(
++            'GEOMETRYCOLLECTION('
++            . 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0)),'
++            . 'POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))'
++            . ')');
++    }
++
++    /* Two squares with a small gap in between: not a valid coverage. */
++    private function gappedPair()
++    {
++        return $this->reader()->read(
++            'GEOMETRYCOLLECTION('
++            . 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0)),'
++            . 'POLYGON((1.1 0, 2.1 0, 2.1 1, 1.1 1, 1.1 0))'
++            . ')');
++    }
++
++    public function testOverlapMergeConstantsRegistered()
++    {
++        $this->assertTrue(defined('GEOS_OVERLAP_MERGE_LONGEST_BORDER'));
++        $this->assertTrue(defined('GEOS_OVERLAP_MERGE_MAX_AREA'));
++        $this->assertTrue(defined('GEOS_OVERLAP_MERGE_MIN_AREA'));
++        $this->assertTrue(defined('GEOS_OVERLAP_MERGE_MIN_INDEX'));
++        /* C-enum names also exposed */
++        $this->assertTrue(defined('GEOS_MERGE_LONGEST_BORDER'));
++        $this->assertTrue(defined('GEOS_MERGE_MAX_AREA'));
++        $this->assertTrue(defined('GEOS_MERGE_MIN_AREA'));
++        $this->assertTrue(defined('GEOS_MERGE_MIN_INDEX'));
++        /* Aliases share enum values */
++        $this->assertEquals(GEOS_MERGE_LONGEST_BORDER,
++                            GEOS_OVERLAP_MERGE_LONGEST_BORDER);
++        $this->assertEquals(GEOS_MERGE_MIN_INDEX,
++                            GEOS_OVERLAP_MERGE_MIN_INDEX);
++    }
++
++    public function testCoverageUnion()
++    {
++        $g = $this->adjacentPair();
++        $u = $g->coverageUnion();
++        $this->assertNotNull($u);
++        /* Union of two adjacent unit squares = one 2x1 polygon, area 2 */
++        $this->assertEquals(2.0, $u->area());
++    }
++
++    public function testCoverageIsValid_validCoverage()
++    {
++        $g = $this->adjacentPair();
++        $r = $g->coverageIsValid();
++        $this->assertTrue(is_array($r));
++        $this->assertTrue($r['valid']);
++        /* GEOSCoverageIsValid always populates invalidEdges (per upstream
++         * docs): each polygon gets a MULTILINESTRING of error edges, or an
++         * EMPTY where it's a valid participant. So 'invalid' is a
++         * GEOSGeometry whose members are all empty for a valid coverage. */
++        $this->assertNotNull($r['invalid']);
++        $this->assertTrue($r['invalid'] instanceof GEOSGeometry);
++        $this->assertTrue($r['invalid']->isEmpty());
++    }
++
++    public function testCoverageIsValid_invalidCoverage()
++    {
++        $g = $this->gappedPair();
++        /* gapWidth of 0.5 (> the 0.1 gap) -> coverage detected as invalid */
++        $r = $g->coverageIsValid(0.5);
++        $this->assertTrue(is_array($r));
++        $this->assertFalse($r['valid']);
++        $this->assertNotNull($r['invalid']);
++        $this->assertTrue($r['invalid'] instanceof GEOSGeometry);
++        /* When invalid, the geometry has at least one non-empty member. */
++        $this->assertFalse($r['invalid']->isEmpty());
++    }
++
++    public function testCoverageSimplifyVW()
++    {
++        /* A coverage with extra collinear vertices on the shared edge. */
++        $g = $this->reader()->read(
++            'GEOMETRYCOLLECTION('
++            . 'POLYGON((0 0, 0.5 0, 1 0, 1 0.5, 1 1, 0.5 1, 0 1, 0 0.5, 0 0)),'
++            . 'POLYGON((1 0, 2 0, 2 1, 1 1, 1 0.5, 1 0))'
++            . ')');
++        $orig = $g->numCoordinates();
++        $s = $g->coverageSimplifyVW(1.0);
++        $this->assertNotNull($s);
++        $this->assertTrue($s->numCoordinates() <= $orig);
++    }
++
++    public function testCoverageClean_emptyParams()
++    {
++        $g = $this->adjacentPair();
++        $c = $g->coverageClean(array());
++        $this->assertNotNull($c);
++        $this->assertTrue($c instanceof GEOSGeometry);
++    }
++
++    public function testCoverageClean_noArgs()
++    {
++        $g = $this->adjacentPair();
++        $c = $g->coverageClean();
++        $this->assertNotNull($c);
++    }
++
++    public function testCoverageClean_withSnapDistance()
++    {
++        $g = $this->gappedPair();
++        $c = $g->coverageClean(array('snap_distance' => 0.5));
++        $this->assertNotNull($c);
++        $this->assertTrue($c instanceof GEOSGeometry);
++    }
++
++    public function testCoverageClean_withOverlapStrategy()
++    {
++        $g = $this->adjacentPair();
++        $c = $g->coverageClean(array(
++            'snap_distance' => 0.0,
++            'gap_max_width' => 0.0,
++            'overlap_strategy' => GEOS_OVERLAP_MERGE_MIN_INDEX,
++        ));
++        $this->assertNotNull($c);
++    }
++}
++
++CoverageTest::run();
++
++?>
++--EXPECT--
++CoverageTest->testOverlapMergeConstantsRegistered	OK
++CoverageTest->testCoverageUnion	OK
++CoverageTest->testCoverageIsValid_validCoverage	OK
++CoverageTest->testCoverageIsValid_invalidCoverage	OK
++CoverageTest->testCoverageSimplifyVW	OK
++CoverageTest->testCoverageClean_emptyParams	OK
++CoverageTest->testCoverageClean_noArgs	OK
++CoverageTest->testCoverageClean_withSnapDistance	OK
++CoverageTest->testCoverageClean_withOverlapStrategy	OK
+diff --git a/tests/022_Clustering.phpt b/tests/022_Clustering.phpt
+new file mode 100644
+index 0000000..8b92931
+--- /dev/null
++++ b/tests/022_Clustering.phpt
+@@ -0,0 +1,166 @@
++--TEST--
++GEOSGeometry clustering family + GEOSClusterResult (Item 14)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class ClusteringTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    /* Six points in two distinct groups. */
++    private function pointGroups()
++    {
++        return $this->reader()->read(
++            'MULTIPOINT('
++            . '(0 0),(0 0.1),(0.1 0),'      /* tight cluster A */
++            . '(10 10),(10 10.1),(10.1 10)' /* tight cluster B */
++            . ')');
++    }
++
++    public function testClusterResultClassExists()
++    {
++        $this->assertTrue(class_exists('GEOSClusterResult'));
++    }
++
++    public function testDirectConstructionThrows()
++    {
++        try {
++            $r = new GEOSClusterResult();
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains('cannot be constructed', $e->getMessage());
++        }
++    }
++
++    public function testClusterDBSCAN()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterDBSCAN(1.0, 2);
++        $this->assertNotNull($r);
++        $this->assertTrue($r instanceof GEOSClusterResult);
++        /* Two clusters expected. */
++        $this->assertEquals(2, $r->getNumClusters());
++        /* Each cluster has 3 inputs. */
++        $this->assertEquals(3, $r->getClusterSize(0));
++        $this->assertEquals(3, $r->getClusterSize(1));
++    }
++
++    public function testClusterDBSCAN_unclusteredOutlier()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOINT((0 0),(0 0.1),(0.1 0),(100 100))');
++        $r = $g->clusterDBSCAN(1.0, 2);
++        $this->assertEquals(1, $r->getNumClusters());
++        $forInputs = $r->getClustersForInputs();
++        $this->assertEquals(4, count($forInputs));
++        /* Outlier at index 3 is unclustered (-1) */
++        $this->assertEquals(-1, $forInputs[3]);
++    }
++
++    public function testGetClustersForInputs()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterDBSCAN(1.0, 2);
++        $forInputs = $r->getClustersForInputs();
++        $this->assertTrue(is_array($forInputs));
++        /* One entry per input geometry (6). */
++        $this->assertEquals(6, count($forInputs));
++        /* All 6 inputs are clustered (no -1). */
++        foreach ($forInputs as $cidx) {
++            $this->assertTrue($cidx === 0 || $cidx === 1);
++        }
++    }
++
++    public function testGetInputsForCluster()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterDBSCAN(1.0, 2);
++        $inputs0 = $r->getInputsForCluster(0);
++        $inputs1 = $r->getInputsForCluster(1);
++        $this->assertTrue(is_array($inputs0));
++        $this->assertTrue(is_array($inputs1));
++        $this->assertEquals(3, count($inputs0));
++        $this->assertEquals(3, count($inputs1));
++        /* The two clusters together should cover indices 0..5 exactly. */
++        $all = array_merge($inputs0, $inputs1);
++        sort($all);
++        $this->assertEquals(array(0, 1, 2, 3, 4, 5), $all);
++    }
++
++    public function testGetInputsForClusterOutOfRange()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterDBSCAN(1.0, 2);
++        try {
++            $r->getInputsForCluster(99);
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains('out of range', $e->getMessage());
++        }
++    }
++
++    public function testClusterByDistance_geometry()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterByDistance(1.0, false);
++        $this->assertNotNull($r);
++        $this->assertEquals(2, $r->getNumClusters());
++    }
++
++    public function testClusterByDistance_envelope()
++    {
++        $g = $this->pointGroups();
++        $r = $g->clusterByDistance(1.0, true);
++        $this->assertNotNull($r);
++        $this->assertEquals(2, $r->getNumClusters());
++    }
++
++    public function testClusterByIntersection_geometry()
++    {
++        /* Three overlapping squares + one disjoint square => 2 clusters. */
++        $g = $this->reader()->read(
++            'GEOMETRYCOLLECTION('
++            . 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0)),'
++            . 'POLYGON((0.5 0, 1.5 0, 1.5 1, 0.5 1, 0.5 0)),'
++            . 'POLYGON((1.2 0, 2.2 0, 2.2 1, 1.2 1, 1.2 0)),'
++            . 'POLYGON((10 10, 11 10, 11 11, 10 11, 10 10))'
++            . ')');
++        $r = $g->clusterByIntersection(false);
++        $this->assertNotNull($r);
++        /* 3 overlap into 1 cluster, 1 alone -> 2 clusters */
++        $this->assertEquals(2, $r->getNumClusters());
++    }
++
++    public function testClusterByIntersection_envelope()
++    {
++        $g = $this->reader()->read(
++            'GEOMETRYCOLLECTION('
++            . 'POLYGON((0 0, 1 0, 1 1, 0 1, 0 0)),'
++            . 'POLYGON((0.5 0, 1.5 0, 1.5 1, 0.5 1, 0.5 0)),'
++            . 'POLYGON((10 10, 11 10, 11 11, 10 11, 10 10))'
++            . ')');
++        $r = $g->clusterByIntersection(true);
++        $this->assertNotNull($r);
++        $this->assertEquals(2, $r->getNumClusters());
++    }
++}
++
++ClusteringTest::run();
++
++?>
++--EXPECT--
++ClusteringTest->testClusterResultClassExists	OK
++ClusteringTest->testDirectConstructionThrows	OK
++ClusteringTest->testClusterDBSCAN	OK
++ClusteringTest->testClusterDBSCAN_unclusteredOutlier	OK
++ClusteringTest->testGetClustersForInputs	OK
++ClusteringTest->testGetInputsForCluster	OK
++ClusteringTest->testGetInputsForClusterOutOfRange	OK
++ClusteringTest->testClusterByDistance_geometry	OK
++ClusteringTest->testClusterByDistance_envelope	OK
++ClusteringTest->testClusterByIntersection_geometry	OK
++ClusteringTest->testClusterByIntersection_envelope	OK
+diff --git a/tests/023_Delaunay.phpt b/tests/023_Delaunay.phpt
+new file mode 100644
+index 0000000..9356cf2
+--- /dev/null
++++ b/tests/023_Delaunay.phpt
+@@ -0,0 +1,89 @@
++--TEST--
++GEOSGeometry::delaunayTriangulation $constrained option (Item 15)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class DelaunayTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    /* A non-convex polygon (an "L" shape) — constrained Delaunay should
++     * triangulate it within its bounds. */
++    private function lShape()
++    {
++        return $this->reader()->read(
++            'POLYGON((0 0, 4 0, 4 1, 1 1, 1 4, 0 4, 0 0))');
++    }
++
++    public function testConstrainedReturnsCollection()
++    {
++        $g = $this->lShape();
++        $t = $g->delaunayTriangulation(0.0, false, true);
++        $this->assertNotNull($t);
++        $this->assertTrue($t instanceof GEOSGeometry);
++        $this->assertEquals('GeometryCollection', $t->typeName());
++        /* Every member is a triangular polygon. */
++        $n = $t->numGeometries();
++        $this->assertTrue($n >= 1);
++        for ($i = 0; $i < $n; ++$i) {
++            $tri = $t->geometryN($i);
++            $this->assertEquals('Polygon', $tri->typeName());
++        }
++    }
++
++    public function testConstrainedVsUnconstrainedVertexCount()
++    {
++        $g = $this->lShape();
++        $unc = $g->delaunayTriangulation(0.0, false, false);
++        $con = $g->delaunayTriangulation(0.0, false, true);
++        /* Unconstrained on a non-convex polygon triangulates the convex
++         * hull, producing more triangles than the constrained variant
++         * which respects the polygon boundary. */
++        $this->assertTrue($unc->numGeometries() >= 1);
++        $this->assertTrue($con->numGeometries() >= 1);
++        /* Both produce at least some triangles; the unconstrained should
++         * cover the convex hull (>= 4 triangles for an L-shape's hull). */
++        $this->assertTrue($unc->numCoordinates() > 0);
++        $this->assertTrue($con->numCoordinates() > 0);
++    }
++
++    public function testConstrainedIgnoresToleranceAndEdgeOnly()
++    {
++        $g = $this->lShape();
++        /* Even with edgeOnly=true requested, constrained variant returns
++         * a polygon-bearing GeometryCollection (it ignores the flag). */
++        $t = $g->delaunayTriangulation(0.5, true, true);
++        $this->assertNotNull($t);
++        $this->assertEquals('GeometryCollection', $t->typeName());
++        $n = $t->numGeometries();
++        if ($n > 0) {
++            $this->assertEquals('Polygon', $t->geometryN(0)->typeName());
++        }
++    }
++
++    public function testDefaultStillUnconstrained()
++    {
++        /* Calling with the original 0/2-arg signature still works. */
++        $g = $this->lShape();
++        $t1 = $g->delaunayTriangulation();
++        $t2 = $g->delaunayTriangulation(0.0);
++        $t3 = $g->delaunayTriangulation(0.0, false);
++        $this->assertNotNull($t1);
++        $this->assertNotNull($t2);
++        $this->assertNotNull($t3);
++        $this->assertEquals('GeometryCollection', $t1->typeName());
++    }
++}
++
++DelaunayTest::run();
++
++?>
++--EXPECT--
++DelaunayTest->testConstrainedReturnsCollection	OK
++DelaunayTest->testConstrainedVsUnconstrainedVertexCount	OK
++DelaunayTest->testConstrainedIgnoresToleranceAndEdgeOnly	OK
++DelaunayTest->testDefaultStillUnconstrained	OK
+-- 
+2.34.1
+

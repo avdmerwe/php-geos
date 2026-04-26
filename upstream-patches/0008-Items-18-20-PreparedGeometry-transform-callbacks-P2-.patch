@@ -1,0 +1,1605 @@
+From 6258115645bd8496bc912e0131ea079308466d25 Mon Sep 17 00:00:00 2001
+From: Abraham van der Merwe <abz@frogfoot.com>
+Date: Sun, 26 Apr 2026 17:28:39 +0200
+Subject: [PATCH 8/8] Items 18-20: PreparedGeometry, transform callbacks, P2
+ fillers
+
+Item 18 - GEOSPreparedGeometry
+  Factory: GEOSGeometry::prepare() -> GEOSPreparedGeometry
+  17 methods: contains, containsProperly, containsXY, coveredBy,
+              covers, crosses, disjoint, intersects, intersectsXY,
+              overlaps, touches, within, relate, relatePattern,
+              distance, distanceWithin, nearestPoints
+  __construct() locked.
+
+  Lifecycle: PreparedRelay struct holds GEOSPreparedGeometry* +
+  ZVAL_COPY of source GEOSGeometry zval. Source is kept alive for
+  the prepared geom's lifetime. Dtor destroys prepared first,
+  then drops source zval refcount.
+
+Item 19 - Coordinate-transform callbacks
+  GEOSGeometry::transformXY(callable) -> GEOSGeometry
+  GEOSGeometry::transformXYZ(callable) -> GEOSGeometry
+
+  PHP callable receives ($x, $y[, $z]), returns
+  [$newX, $newY[, $newZ]]. Sticky-exception capture mirrors
+  STRtree pattern. Validates ret-array shape and applies numeric
+  coercion before writing back to GEOS.
+
+Item 20 - P2 fillers
+  GEOSGeometry::hilbertCode($extent, $level) : int
+  GEOSGeometry::gridIntersectionFractions($xmin, $ymin, $xmax,
+                                          $ymax, $nx, $ny) : array
+                (signature follows C API; plan's '$grid geometry'
+                form would need a PHP-side wrapper)
+  Standalone GEOSOrientationIndex($ax, $ay, $bx, $by, $px, $py)
+  Standalone GEOSSegmentIntersection(8 doubles) : ?array
+
+Tests: 040_PreparedGeometry.phpt, 050_Transform.phpt, 060_Misc.phpt.
+
+25/25 .phpt tests pass.
+---
+ arginfo.h                       |  85 ++++
+ geos.c                          | 874 ++++++++++++++++++++++++++++++++
+ tests/040_PreparedGeometry.phpt | 257 ++++++++++
+ tests/050_Transform.phpt        | 122 +++++
+ tests/060_Misc.phpt             | 134 +++++
+ 5 files changed, 1472 insertions(+)
+ create mode 100644 tests/040_PreparedGeometry.phpt
+ create mode 100644 tests/050_Transform.phpt
+ create mode 100644 tests/060_Misc.phpt
+
+diff --git a/arginfo.h b/arginfo.h
+index aa4baac..25bd333 100644
+--- a/arginfo.h
++++ b/arginfo.h
+@@ -669,3 +669,88 @@ ZEND_END_ARG_INFO()
+ 
+ #define arginfo_STRtree_nearest                  arginfo_geom
+ 
++
++/* -- Item 18: PreparedGeometry ------------------- */
++
++#define arginfo_Geometry_prepare                 arginfo_void
++
++#define arginfo_PreparedGeometry_construct       arginfo_void
++
++/* Most prepared predicates take a single GEOSGeometry $other. */
++#define arginfo_PreparedGeometry_contains         arginfo_geom
++#define arginfo_PreparedGeometry_containsProperly arginfo_geom
++#define arginfo_PreparedGeometry_coveredBy        arginfo_geom
++#define arginfo_PreparedGeometry_covers           arginfo_geom
++#define arginfo_PreparedGeometry_crosses          arginfo_geom
++#define arginfo_PreparedGeometry_disjoint         arginfo_geom
++#define arginfo_PreparedGeometry_intersects       arginfo_geom
++#define arginfo_PreparedGeometry_overlaps         arginfo_geom
++#define arginfo_PreparedGeometry_touches          arginfo_geom
++#define arginfo_PreparedGeometry_within           arginfo_geom
++#define arginfo_PreparedGeometry_relate           arginfo_geom
++#define arginfo_PreparedGeometry_distance         arginfo_geom
++#define arginfo_PreparedGeometry_nearestPoints    arginfo_geom
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_containsXY, 0, 0, 2)
++    ZEND_ARG_INFO(0, x)
++    ZEND_ARG_INFO(0, y)
++ZEND_END_ARG_INFO()
++
++#define arginfo_PreparedGeometry_intersectsXY    arginfo_PreparedGeometry_containsXY
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_relatePattern, 0, 0, 2)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, pattern)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_PreparedGeometry_distanceWithin, 0, 0, 2)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, maxDist)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 19: Coordinate-transform callbacks ----- */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_transformXY, 0, 0, 1)
++    ZEND_ARG_INFO(0, cb)
++ZEND_END_ARG_INFO()
++
++#define arginfo_Geometry_transformXYZ            arginfo_Geometry_transformXY
++
++
++/* -- Item 20: P2 fillers ------------------------- */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_hilbertCode, 0, 0, 2)
++    ZEND_ARG_INFO(0, extent)
++    ZEND_ARG_INFO(0, level)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_gridIntersectionFractions, 0, 0, 6)
++    ZEND_ARG_INFO(0, xmin)
++    ZEND_ARG_INFO(0, ymin)
++    ZEND_ARG_INFO(0, xmax)
++    ZEND_ARG_INFO(0, ymax)
++    ZEND_ARG_INFO(0, nx)
++    ZEND_ARG_INFO(0, ny)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSOrientationIndex, 0, 0, 6)
++    ZEND_ARG_INFO(0, ax)
++    ZEND_ARG_INFO(0, ay)
++    ZEND_ARG_INFO(0, bx)
++    ZEND_ARG_INFO(0, by)
++    ZEND_ARG_INFO(0, px)
++    ZEND_ARG_INFO(0, py)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSSegmentIntersection, 0, 0, 8)
++    ZEND_ARG_INFO(0, ax0)
++    ZEND_ARG_INFO(0, ay0)
++    ZEND_ARG_INFO(0, ax1)
++    ZEND_ARG_INFO(0, ay1)
++    ZEND_ARG_INFO(0, bx0)
++    ZEND_ARG_INFO(0, by0)
++    ZEND_ARG_INFO(0, bx1)
++    ZEND_ARG_INFO(0, by1)
++ZEND_END_ARG_INFO()
++
+diff --git a/geos.c b/geos.c
+index 5aacf7f..bbb23b0 100644
+--- a/geos.c
++++ b/geos.c
+@@ -50,6 +50,10 @@ PHP_FUNCTION(GEOSPolygonizeCutEdges);
+ PHP_FUNCTION(GEOSBuildArea);
+ PHP_FUNCTION(GEOSDisjointSubsetUnion);
+ 
++/* Item 20: P2 standalone fillers */
++PHP_FUNCTION(GEOSOrientationIndex);
++PHP_FUNCTION(GEOSSegmentIntersection);
++
+ #ifdef HAVE_GEOS_SHARED_PATHS
+ PHP_FUNCTION(GEOSSharedPaths);
+ #endif
+@@ -98,6 +102,10 @@ static zend_function_entry geos_functions[] = {
+     PHP_FE(GEOSBuildArea, arginfo_GEOSBuildArea)
+     PHP_FE(GEOSDisjointSubsetUnion, arginfo_GEOSDisjointSubsetUnion)
+ 
++    /* Item 20: P2 standalone fillers */
++    PHP_FE(GEOSOrientationIndex, arginfo_GEOSOrientationIndex)
++    PHP_FE(GEOSSegmentIntersection, arginfo_GEOSSegmentIntersection)
++
+ #   ifdef HAVE_GEOS_SHARED_PATHS
+     PHP_FE(GEOSSharedPaths, arginfo_GEOSSharedPaths)
+ #   endif
+@@ -512,6 +520,17 @@ PHP_METHOD(Geometry, clusterDBSCAN);
+ PHP_METHOD(Geometry, clusterByDistance);
+ PHP_METHOD(Geometry, clusterByIntersection);
+ 
++/* Item 18 — Prepared geometry factory */
++PHP_METHOD(Geometry, prepare);
++
++/* Item 19 — Coordinate-transform callbacks */
++PHP_METHOD(Geometry, transformXY);
++PHP_METHOD(Geometry, transformXYZ);
++
++/* Item 20 — P2 fillers */
++PHP_METHOD(Geometry, hilbertCode);
++PHP_METHOD(Geometry, gridIntersectionFractions);
++
+ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
+     PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
+@@ -738,6 +757,17 @@ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, clusterByDistance, arginfo_Geometry_clusterByDistance, 0)
+     PHP_ME(Geometry, clusterByIntersection, arginfo_Geometry_clusterByIntersection, 0)
+ 
++    /* Item 18 — Prepared geometry factory */
++    PHP_ME(Geometry, prepare, arginfo_Geometry_prepare, 0)
++
++    /* Item 19 — Coordinate-transform callbacks */
++    PHP_ME(Geometry, transformXY, arginfo_Geometry_transformXY, 0)
++    PHP_ME(Geometry, transformXYZ, arginfo_Geometry_transformXYZ, 0)
++
++    /* Item 20 — P2 fillers */
++    PHP_ME(Geometry, hilbertCode, arginfo_Geometry_hilbertCode, 0)
++    PHP_ME(Geometry, gridIntersectionFractions, arginfo_Geometry_gridIntersectionFractions, 0)
++
+     {NULL, NULL, NULL}
+ };
+ 
+@@ -749,6 +779,8 @@ static zend_class_entry *CoordSeq_ce_ptr;
+ static zend_class_entry *ClusterResult_ce_ptr;
+ /* forward declared for use by Geometry::* (none yet); class defined below. */
+ static zend_class_entry *STRtree_ce_ptr;
++/* forward declared for use by Geometry::prepare(); class defined below. */
++static zend_class_entry *PreparedGeometry_ce_ptr;
+ 
+ static zend_object_handlers Geometry_object_handlers;
+ 
+@@ -7042,6 +7074,836 @@ PHP_METHOD(STRtree, nearest)
+     }
+ }
+ 
++/* -- Item 18: GEOSPreparedGeometry --------------------------- */
++
++/*
++ * Lifecycle / ownership invariants
++ * ================================
++ *
++ * GEOSPreparedGeometry is a non-owning view into the source GEOSGeometry.
++ * Upstream's GEOSPrepare_r returns a const pointer that is INVALIDATED if
++ * the source GEOSGeometry is destroyed. We therefore must keep the source
++ * alive for the prepared geom's lifetime by holding a strong PHP zval
++ * reference to the source GEOSGeometry zval.
++ *
++ * The PHP relay is a heap-allocated PreparedRelay struct holding both the
++ * prepared-geometry pointer and a copied (refcount-bumped) zval to the
++ * source. The dtor:
++ *   1. Calls GEOSPreparedGeom_destroy_r(handle, prepared).
++ *   2. Drops the source zval refcount via zval_ptr_dtor (this may free the
++ *      underlying GEOSGeometry if no other PHP references remain).
++ *   3. efrees the relay.
++ *
++ * __construct() is locked: prepared geometries are created only via
++ * GEOSGeometry::prepare().
++ *
++ * For nearestPoints: GEOSPreparedNearestPoints_r returns a fresh
++ * GEOSCoordSequence that the caller owns. We wrap it directly via
++ * setRelay (no clone) — the new GEOSCoordSeq PHP object becomes the owner.
++ */
++
++typedef struct {
++    const GEOSPreparedGeometry *prepared;
++    zval source;  /* ZVAL_COPY of the source GEOSGeometry zval */
++} PreparedRelay;
++
++PHP_METHOD(PreparedGeometry, __construct);
++PHP_METHOD(PreparedGeometry, contains);
++PHP_METHOD(PreparedGeometry, containsProperly);
++PHP_METHOD(PreparedGeometry, containsXY);
++PHP_METHOD(PreparedGeometry, coveredBy);
++PHP_METHOD(PreparedGeometry, covers);
++PHP_METHOD(PreparedGeometry, crosses);
++PHP_METHOD(PreparedGeometry, disjoint);
++PHP_METHOD(PreparedGeometry, intersects);
++PHP_METHOD(PreparedGeometry, intersectsXY);
++PHP_METHOD(PreparedGeometry, overlaps);
++PHP_METHOD(PreparedGeometry, touches);
++PHP_METHOD(PreparedGeometry, within);
++PHP_METHOD(PreparedGeometry, relate);
++PHP_METHOD(PreparedGeometry, relatePattern);
++PHP_METHOD(PreparedGeometry, distance);
++PHP_METHOD(PreparedGeometry, distanceWithin);
++PHP_METHOD(PreparedGeometry, nearestPoints);
++
++static zend_function_entry PreparedGeometry_methods[] = {
++    PHP_ME(PreparedGeometry, __construct,        arginfo_PreparedGeometry_construct,        0)
++    PHP_ME(PreparedGeometry, contains,           arginfo_PreparedGeometry_contains,           0)
++    PHP_ME(PreparedGeometry, containsProperly,   arginfo_PreparedGeometry_containsProperly,   0)
++    PHP_ME(PreparedGeometry, containsXY,         arginfo_PreparedGeometry_containsXY,         0)
++    PHP_ME(PreparedGeometry, coveredBy,          arginfo_PreparedGeometry_coveredBy,          0)
++    PHP_ME(PreparedGeometry, covers,             arginfo_PreparedGeometry_covers,             0)
++    PHP_ME(PreparedGeometry, crosses,            arginfo_PreparedGeometry_crosses,            0)
++    PHP_ME(PreparedGeometry, disjoint,           arginfo_PreparedGeometry_disjoint,           0)
++    PHP_ME(PreparedGeometry, intersects,         arginfo_PreparedGeometry_intersects,         0)
++    PHP_ME(PreparedGeometry, intersectsXY,       arginfo_PreparedGeometry_intersectsXY,       0)
++    PHP_ME(PreparedGeometry, overlaps,           arginfo_PreparedGeometry_overlaps,           0)
++    PHP_ME(PreparedGeometry, touches,            arginfo_PreparedGeometry_touches,            0)
++    PHP_ME(PreparedGeometry, within,             arginfo_PreparedGeometry_within,             0)
++    PHP_ME(PreparedGeometry, relate,             arginfo_PreparedGeometry_relate,             0)
++    PHP_ME(PreparedGeometry, relatePattern,      arginfo_PreparedGeometry_relatePattern,      0)
++    PHP_ME(PreparedGeometry, distance,           arginfo_PreparedGeometry_distance,           0)
++    PHP_ME(PreparedGeometry, distanceWithin,     arginfo_PreparedGeometry_distanceWithin,     0)
++    PHP_ME(PreparedGeometry, nearestPoints,      arginfo_PreparedGeometry_nearestPoints,      0)
++    {NULL, NULL, NULL}
++};
++
++static zend_object_handlers PreparedGeometry_object_handlers;
++
++static void
++PreparedGeometry_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
++{
++#if PHP_VERSION_ID < 70000
++    Proxy *obj = (Proxy *)object;
++#else
++    Proxy *obj = php_geos_fetch_object(object);
++#endif
++
++    PreparedRelay *r = (PreparedRelay*)obj->relay;
++    if (r) {
++        if (r->prepared) {
++            GEOSPreparedGeom_destroy_r(GEOS_G(handle), r->prepared);
++        }
++        /* Drop our refcount on the source GEOSGeometry zval. */
++        zval_ptr_dtor(&r->source);
++        efree(r);
++    }
++
++#if PHP_VERSION_ID < 70000
++    zend_hash_destroy(obj->std.properties);
++    FREE_HASHTABLE(obj->std.properties);
++
++    efree(obj);
++#endif
++}
++
++static zend_object_value
++PreparedGeometry_create_obj (zend_class_entry *type TSRMLS_DC)
++{
++    return Gen_create_obj(type, PreparedGeometry_dtor,
++            &PreparedGeometry_object_handlers);
++}
++
++PHP_METHOD(PreparedGeometry, __construct)
++{
++    /* Locked: only GEOSGeometry::prepare() may create a GEOSPreparedGeometry. */
++    zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C), 1 TSRMLS_CC,
++        "GEOSPreparedGeometry cannot be constructed directly; "
++        "use GEOSGeometry::prepare()");
++}
++
++/**
++ * GEOSGeometry::prepare() : GEOSPreparedGeometry
++ *
++ * Build a prepared-geometry view of $this. The PHP-side GEOSPreparedGeometry
++ * holds a strong reference to $this so the underlying GEOSGeometry stays
++ * alive even if the PHP source variable is freed before the prepared geom.
++ */
++PHP_METHOD(Geometry, prepare)
++{
++    GEOSGeometry *this;
++    const GEOSPreparedGeometry *pg;
++    PreparedRelay *r;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    pg = GEOSPrepare_r(GEOS_G(handle), this);
++    if ( ! pg ) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSPrepare() failed");
++        }
++        RETURN_NULL();
++    }
++
++    r = (PreparedRelay*)emalloc(sizeof(PreparedRelay));
++    r->prepared = pg;
++    /* ZVAL_COPY bumps the refcount of the source zval/object so it survives
++     * for the lifetime of this prepared-geometry wrapper. */
++    ZVAL_COPY(&r->source, getThis());
++
++    object_init_ex(return_value, PreparedGeometry_ce_ptr);
++    setRelay(return_value, r);
++}
++
++/* Helper: extract the prepared pointer from the PreparedGeometry object. */
++static inline const GEOSPreparedGeometry *
++getPrepared(zval *zv)
++{
++    PreparedRelay *r = (PreparedRelay*)getRelay(zv, PreparedGeometry_ce_ptr);
++    return r->prepared;
++}
++
++/* -- Predicate dispatch helpers ----------------------------- */
++/* Each predicate variant maps a char return value to a PHP boolean.
++ * GEOS's char predicates return 2 on error; we throw on 2. */
++
++#define PG_BOOL_PREDICATE(METHOD_NAME, C_FN)                                  \
++    PHP_METHOD(PreparedGeometry, METHOD_NAME)                                 \
++    {                                                                         \
++        const GEOSPreparedGeometry *pg;                                       \
++        GEOSGeometry *other;                                                  \
++        zval *zobj;                                                           \
++        char ret;                                                             \
++                                                                              \
++        pg = getPrepared(getThis());                                          \
++                                                                              \
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)      \
++                == FAILURE) {                                                 \
++            RETURN_NULL();                                                    \
++        }                                                                     \
++        other = getRelay(zobj, Geometry_ce_ptr);                              \
++                                                                              \
++        ret = C_FN(GEOS_G(handle), pg, other);                                \
++        if (ret == 2) {                                                       \
++            if ( ! EG(exception)) {                                           \
++                zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C), \
++                    1 TSRMLS_CC, #C_FN " failed");                            \
++            }                                                                 \
++            RETURN_NULL();                                                    \
++        }                                                                     \
++        RETURN_BOOL(ret);                                                     \
++    }
++
++PG_BOOL_PREDICATE(contains,         GEOSPreparedContains_r)
++PG_BOOL_PREDICATE(containsProperly, GEOSPreparedContainsProperly_r)
++PG_BOOL_PREDICATE(coveredBy,        GEOSPreparedCoveredBy_r)
++PG_BOOL_PREDICATE(covers,           GEOSPreparedCovers_r)
++PG_BOOL_PREDICATE(crosses,          GEOSPreparedCrosses_r)
++PG_BOOL_PREDICATE(disjoint,         GEOSPreparedDisjoint_r)
++PG_BOOL_PREDICATE(intersects,       GEOSPreparedIntersects_r)
++PG_BOOL_PREDICATE(overlaps,         GEOSPreparedOverlaps_r)
++PG_BOOL_PREDICATE(touches,          GEOSPreparedTouches_r)
++PG_BOOL_PREDICATE(within,           GEOSPreparedWithin_r)
++
++#undef PG_BOOL_PREDICATE
++
++/* containsXY / intersectsXY take two doubles instead of a geometry. */
++PHP_METHOD(PreparedGeometry, containsXY)
++{
++    const GEOSPreparedGeometry *pg;
++    double x, y;
++    char ret;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd", &x, &y)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSPreparedContainsXY_r(GEOS_G(handle), pg, x, y);
++    if (ret == 2) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSPreparedContainsXY failed");
++        }
++        RETURN_NULL();
++    }
++    RETURN_BOOL(ret);
++}
++
++PHP_METHOD(PreparedGeometry, intersectsXY)
++{
++    const GEOSPreparedGeometry *pg;
++    double x, y;
++    char ret;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd", &x, &y)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSPreparedIntersectsXY_r(GEOS_G(handle), pg, x, y);
++    if (ret == 2) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSPreparedIntersectsXY failed");
++        }
++        RETURN_NULL();
++    }
++    RETURN_BOOL(ret);
++}
++
++/**
++ * GEOSPreparedRelate_r returns a freshly GEOS-allocated 9-character matrix
++ * string that the caller MUST free with GEOSFree_r.
++ */
++PHP_METHOD(PreparedGeometry, relate)
++{
++    const GEOSPreparedGeometry *pg;
++    GEOSGeometry *other;
++    zval *zobj;
++    char *im;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    im = GEOSPreparedRelate_r(GEOS_G(handle), pg, other);
++    if ( ! im ) {
++        RETURN_NULL();
++    }
++
++#if PHP_VERSION_ID >= 70000
++    RETVAL_STRING(im);
++#else
++    RETVAL_STRING(im, 1);
++#endif
++    GEOSFree_r(GEOS_G(handle), im);
++}
++
++PHP_METHOD(PreparedGeometry, relatePattern)
++{
++    const GEOSPreparedGeometry *pg;
++    GEOSGeometry *other;
++    zval *zobj;
++    char *pattern;
++#if PHP_VERSION_ID >= 70000
++    size_t pattern_len;
++#else
++    int pattern_len;
++#endif
++    char ret;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "os",
++            &zobj, &pattern, &pattern_len) == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    ret = GEOSPreparedRelatePattern_r(GEOS_G(handle), pg, other, pattern);
++    if (ret == 2) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSPreparedRelatePattern failed");
++        }
++        RETURN_NULL();
++    }
++    RETURN_BOOL(ret);
++}
++
++PHP_METHOD(PreparedGeometry, distance)
++{
++    const GEOSPreparedGeometry *pg;
++    GEOSGeometry *other;
++    zval *zobj;
++    double dist;
++    int rc;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSPreparedDistance_r(GEOS_G(handle), pg, other, &dist);
++    if (rc != 1) RETURN_NULL();
++    RETURN_DOUBLE(dist);
++}
++
++PHP_METHOD(PreparedGeometry, distanceWithin)
++{
++    const GEOSPreparedGeometry *pg;
++    GEOSGeometry *other;
++    zval *zobj;
++    double maxDist;
++    char ret;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
++            &zobj, &maxDist) == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    ret = GEOSPreparedDistanceWithin_r(GEOS_G(handle), pg, other, maxDist);
++    if (ret == 2) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSPreparedDistanceWithin failed");
++        }
++        RETURN_NULL();
++    }
++    RETURN_BOOL(ret);
++}
++
++/**
++ * GEOSPreparedNearestPoints_r returns a NEW GEOSCoordSequence the caller
++ * owns; we wrap it directly into a fresh GEOSCoordSeq PHP object.
++ */
++PHP_METHOD(PreparedGeometry, nearestPoints)
++{
++    const GEOSPreparedGeometry *pg;
++    GEOSGeometry *other;
++    GEOSCoordSequence *cs;
++    zval *zobj;
++
++    pg = getPrepared(getThis());
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    cs = GEOSPreparedNearestPoints_r(GEOS_G(handle), pg, other);
++    if ( ! cs ) RETURN_NULL();
++
++    object_init_ex(return_value, CoordSeq_ce_ptr);
++    setRelay(return_value, cs);
++}
++
++/* -- Item 19: Coordinate-transform callbacks ---------------- */
++
++/*
++ * The callback receives mutable double* pointers; the user's PHP callable
++ * is expected to return [$newX, $newY] (XY) or [$newX, $newY, $newZ] (XYZ).
++ *
++ * Sticky-error pattern (mirrors STRtree): if the callback throws or returns
++ * a malformed value, capture the exception in the context, and return
++ * non-zero from the trampoline so GEOS aborts the transform. The C
++ * function returns NULL on abort; the PHP method then re-throws the
++ * captured exception.
++ *
++ * The trampoline returns int per GEOSTransformXY/XYZCallback semantics:
++ *   1 = success
++ *   0 = failure (causes GEOS to abort and return NULL)
++ */
++
++typedef struct {
++    zval cb;
++    zval exception;
++    int has_exception;
++    int dim;          /* 2 for XY, 3 for XYZ */
++} TransformCtx;
++
++static void
++transform_capture_exception(TransformCtx *ctx)
++{
++    if (ctx->has_exception) return;
++    if (EG(exception)) {
++        ZVAL_OBJ(&ctx->exception, EG(exception));
++        EG(exception) = NULL;
++        ctx->has_exception = 1;
++    }
++}
++
++/* Build a "fake" exception inline for a malformed callback return value;
++ * we want a coherent message at the PHP boundary. */
++static void
++transform_throw_internal(TransformCtx *ctx, const char *msg)
++{
++    if (ctx->has_exception) return;
++    zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC, "%s", msg);
++    transform_capture_exception(ctx);
++}
++
++/* Common body: invoke the user callable with [x, y] or [x, y, z], expect an
++ * array of length 2 or 3 back, write the new values through the pointers.
++ *
++ * Returns 1 on success, 0 on failure (either PHP exception OR malformed
++ * return). On 0 the caller will be aborted by GEOS.
++ */
++static int
++transform_invoke(TransformCtx *ctx, double *x, double *y, double *z)
++{
++    zend_fcall_info fci;
++    zend_fcall_info_cache fcc;
++    zval params[3];
++    zval retval;
++    char *err = NULL;
++    int n_args = ctx->dim;
++    HashTable *retht;
++    zval *xv, *yv, *zv;
++
++    /* Sticky: if a previous invocation threw, no-op out. We still must
++     * return failure so GEOS aborts. */
++    if (ctx->has_exception) return 0;
++
++    memset(&fci, 0, sizeof(fci));
++    memset(&fcc, 0, sizeof(fcc));
++
++    if (zend_fcall_info_init(&ctx->cb, 0, &fci, &fcc, NULL, &err)
++            != SUCCESS) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC, "transform: callback is not callable: %s",
++            err ? err : "unknown");
++        if (err) efree(err);
++        transform_capture_exception(ctx);
++        return 0;
++    }
++    if (err) efree(err);
++
++    ZVAL_DOUBLE(&params[0], *x);
++    ZVAL_DOUBLE(&params[1], *y);
++    if (n_args == 3) {
++        ZVAL_DOUBLE(&params[2], *z);
++    }
++
++    fci.param_count = n_args;
++    fci.params = params;
++    fci.retval = &retval;
++    ZVAL_UNDEF(&retval);
++
++    if (zend_call_function(&fci, &fcc) != SUCCESS) {
++        transform_capture_exception(ctx);
++        if ( ! ctx->has_exception) {
++            transform_throw_internal(ctx,
++                "transform: zend_call_function failed");
++        }
++        return 0;
++    }
++
++    /* If the user callable threw, capture and abort. */
++    if (EG(exception)) {
++        zval_ptr_dtor(&retval);
++        transform_capture_exception(ctx);
++        return 0;
++    }
++
++    /* Validate the return value: must be an array of n_args numerics. */
++    if (Z_TYPE(retval) != IS_ARRAY) {
++        zval_ptr_dtor(&retval);
++        transform_throw_internal(ctx,
++            "transform: callback must return an array of [x, y] (XY) or "
++            "[x, y, z] (XYZ)");
++        return 0;
++    }
++
++    retht = Z_ARRVAL(retval);
++    if ((int)zend_hash_num_elements(retht) != n_args) {
++        zval_ptr_dtor(&retval);
++        transform_throw_internal(ctx,
++            "transform: callback returned an array of the wrong length");
++        return 0;
++    }
++
++    /* Pull positional indices 0,1[,2] (or fall back to first n keys). */
++#if PHP_VERSION_ID >= 70000
++    xv = zend_hash_index_find(retht, 0);
++    yv = zend_hash_index_find(retht, 1);
++    zv = (n_args == 3) ? zend_hash_index_find(retht, 2) : NULL;
++#else
++    {
++        zval **xx = NULL, **yy = NULL, **zz = NULL;
++        zend_hash_index_find(retht, 0, (void**)&xx);
++        zend_hash_index_find(retht, 1, (void**)&yy);
++        if (n_args == 3) {
++            zend_hash_index_find(retht, 2, (void**)&zz);
++        }
++        xv = xx ? *xx : NULL;
++        yv = yy ? *yy : NULL;
++        zv = zz ? *zz : NULL;
++    }
++#endif
++
++    if (!xv || !yv || (n_args == 3 && !zv)) {
++        zval_ptr_dtor(&retval);
++        transform_throw_internal(ctx,
++            "transform: callback return must use integer keys 0..n-1");
++        return 0;
++    }
++
++    {
++        zval tx, ty, tz;
++        ZVAL_COPY(&tx, xv);
++        ZVAL_COPY(&ty, yv);
++        convert_to_double(&tx);
++        convert_to_double(&ty);
++        *x = Z_DVAL(tx);
++        *y = Z_DVAL(ty);
++        zval_ptr_dtor(&tx);
++        zval_ptr_dtor(&ty);
++
++        if (n_args == 3) {
++            ZVAL_COPY(&tz, zv);
++            convert_to_double(&tz);
++            *z = Z_DVAL(tz);
++            zval_ptr_dtor(&tz);
++        }
++    }
++
++    zval_ptr_dtor(&retval);
++    return 1;
++}
++
++static int
++TransformXY_trampoline(double *x, double *y, void *userdata)
++{
++    TransformCtx *ctx = (TransformCtx*)userdata;
++    return transform_invoke(ctx, x, y, NULL);
++}
++
++static int
++TransformXYZ_trampoline(double *x, double *y, double *z, void *userdata)
++{
++    TransformCtx *ctx = (TransformCtx*)userdata;
++    return transform_invoke(ctx, x, y, z);
++}
++
++static int
++transform_propagate_exception(TransformCtx *ctx)
++{
++    if ( ! ctx->has_exception) return 0;
++    zend_throw_exception_object(&ctx->exception);
++    ZVAL_UNDEF(&ctx->exception);
++    ctx->has_exception = 0;
++    return 1;
++}
++
++PHP_METHOD(Geometry, transformXY)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *out;
++    zval *cbz;
++    TransformCtx ctx;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &cbz)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    if ( ! zend_is_callable(cbz, 0, NULL)) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSGeometry::transformXY: argument 1 is not a valid callable");
++        RETURN_NULL();
++    }
++
++    memset(&ctx, 0, sizeof(ctx));
++    ZVAL_UNDEF(&ctx.cb);
++    ZVAL_UNDEF(&ctx.exception);
++    ZVAL_COPY(&ctx.cb, cbz);
++    ctx.dim = 2;
++
++    out = GEOSGeom_transformXY_r(GEOS_G(handle), this,
++            TransformXY_trampoline, &ctx);
++
++    zval_ptr_dtor(&ctx.cb);
++
++    if (transform_propagate_exception(&ctx)) {
++        if (out) GEOSGeom_destroy_r(GEOS_G(handle), out);
++        RETURN_NULL();
++    }
++
++    if ( ! out ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, out);
++}
++
++PHP_METHOD(Geometry, transformXYZ)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *out;
++    zval *cbz;
++    TransformCtx ctx;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &cbz)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    if ( ! zend_is_callable(cbz, 0, NULL)) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSGeometry::transformXYZ: argument 1 is not a valid callable");
++        RETURN_NULL();
++    }
++
++    memset(&ctx, 0, sizeof(ctx));
++    ZVAL_UNDEF(&ctx.cb);
++    ZVAL_UNDEF(&ctx.exception);
++    ZVAL_COPY(&ctx.cb, cbz);
++    ctx.dim = 3;
++
++    out = GEOSGeom_transformXYZ_r(GEOS_G(handle), this,
++            TransformXYZ_trampoline, &ctx);
++
++    zval_ptr_dtor(&ctx.cb);
++
++    if (transform_propagate_exception(&ctx)) {
++        if (out) GEOSGeom_destroy_r(GEOS_G(handle), out);
++        RETURN_NULL();
++    }
++
++    if ( ! out ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, out);
++}
++
++/* -- Item 20: P2 fillers ------------------------------------ */
++
++/**
++ * GEOSGeometry::hilbertCode(GEOSGeometry $extent, int $level) : int
++ */
++PHP_METHOD(Geometry, hilbertCode)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *extent;
++    zval *zobj;
++    zend_long level;
++    unsigned int code = 0;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ol",
++            &zobj, &level) == FAILURE) {
++        RETURN_NULL();
++    }
++    if (level < 0 || level > 16) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSGeometry::hilbertCode: level must be in 0..16 (got %ld)",
++            (long)level);
++        RETURN_NULL();
++    }
++    extent = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSHilbertCode_r(GEOS_G(handle), this, extent,
++            (unsigned int)level, &code);
++    if (rc != 1) {
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSHilbertCode failed");
++        }
++        RETURN_NULL();
++    }
++    RETURN_LONG((long)code);
++}
++
++/**
++ * GEOSGeometry::gridIntersectionFractions(
++ *     float $xmin, float $ymin, float $xmax, float $ymax,
++ *     int $nx, int $ny) : array
++ *
++ * Returns an array of nx*ny fraction floats in row-major order.
++ *
++ * Note: the implementation-plan signature `gridIntersectionFractions(GEOSGeometry $grid)`
++ * does not match the upstream C API, which requires explicit bounds and grid
++ * dimensions. We expose the C signature directly. Plan reviewers can decide
++ * whether to add a thin PHP-side helper that derives bounds from a "grid"
++ * geometry's envelope at a later date.
++ */
++PHP_METHOD(Geometry, gridIntersectionFractions)
++{
++    GEOSGeometry *this;
++    double xmin, ymin, xmax, ymax;
++    zend_long nx, ny;
++    float *buf;
++    size_t cells;
++    size_t i;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "ddddll",
++            &xmin, &ymin, &xmax, &ymax, &nx, &ny) == FAILURE) {
++        RETURN_NULL();
++    }
++    if (nx <= 0 || ny <= 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSGeometry::gridIntersectionFractions: nx and ny must be > 0");
++        RETURN_NULL();
++    }
++
++    cells = (size_t)nx * (size_t)ny;
++    buf = (float*)ecalloc(cells, sizeof(float));
++
++    rc = GEOSGridIntersectionFractions_r(GEOS_G(handle), this,
++            xmin, ymin, xmax, ymax,
++            (unsigned)nx, (unsigned)ny, buf);
++    if (rc != 1) {
++        efree(buf);
++        if ( ! EG(exception)) {
++            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++                1 TSRMLS_CC, "GEOSGridIntersectionFractions failed");
++        }
++        RETURN_NULL();
++    }
++
++    array_init_size(return_value, cells);
++    for (i = 0; i < cells; ++i) {
++        add_next_index_double(return_value, (double)buf[i]);
++    }
++    efree(buf);
++}
++
++/**
++ * Standalone GEOSOrientationIndex(float $ax, $ay, $bx, $by, $px, $py) : int
++ *
++ * Returns -1 (CW), 0 (collinear) or 1 (CCW). Plan calls this
++ * "orientationIndex" but to remain consistent with other standalone
++ * geometry functions (GEOSPolygonize, GEOSBuildArea, ...), we expose it
++ * under the GEOS-prefixed name.
++ */
++PHP_FUNCTION(GEOSOrientationIndex)
++{
++    double ax, ay, bx, by, px, py;
++    int idx;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dddddd",
++            &ax, &ay, &bx, &by, &px, &py) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    idx = GEOSOrientationIndex_r(GEOS_G(handle), ax, ay, bx, by, px, py);
++    RETURN_LONG((long)idx);
++}
++
++/**
++ * Standalone GEOSSegmentIntersection(
++ *     float $ax0, $ay0, $ax1, $ay1,
++ *     float $bx0, $by0, $bx1, $by1) : ?array
++ *
++ * Returns [$x, $y] of intersection point, or NULL if segments are parallel
++ * or do not intersect.
++ */
++PHP_FUNCTION(GEOSSegmentIntersection)
++{
++    double ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
++    double cx = 0.0, cy = 0.0;
++    int rc;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dddddddd",
++            &ax0, &ay0, &ax1, &ay1,
++            &bx0, &by0, &bx1, &by1) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    rc = GEOSSegmentIntersection_r(GEOS_G(handle),
++            ax0, ay0, ax1, ay1,
++            bx0, by0, bx1, by1,
++            &cx, &cy);
++    /* Upstream: 1 = intersection found, 0 = no intersection (parallel, etc.),
++     * -1 = error (e.g. degenerate segment). */
++    if (rc != 1) {
++        RETURN_NULL();
++    }
++
++    array_init(return_value);
++    add_next_index_double(return_value, cx);
++    add_next_index_double(return_value, cy);
++}
++
+ /* ------ Initialization / Deinitialization / Meta ------------------ */
+ 
+ /* per-module initialization */
+@@ -7172,6 +8034,18 @@ PHP_MINIT_FUNCTION(geos)
+     STRtree_object_handlers.free_obj = STRtree_dtor;
+ #endif
+ 
++    /* PreparedGeometry (Item 18) */
++    INIT_CLASS_ENTRY(ce, "GEOSPreparedGeometry", PreparedGeometry_methods);
++    PreparedGeometry_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
++    PreparedGeometry_ce_ptr->create_object = PreparedGeometry_create_obj;
++    memcpy(&PreparedGeometry_object_handlers,
++        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
++    PreparedGeometry_object_handlers.clone_obj = NULL;
++#if PHP_VERSION_ID >= 70000
++    PreparedGeometry_object_handlers.offset = XtOffsetOf(Proxy, std);
++    PreparedGeometry_object_handlers.free_obj = PreparedGeometry_dtor;
++#endif
++
+ 
+     /* Constants */
+     REGISTER_LONG_CONSTANT("GEOSBUF_CAP_ROUND",  GEOSBUF_CAP_ROUND,
+diff --git a/tests/040_PreparedGeometry.phpt b/tests/040_PreparedGeometry.phpt
+new file mode 100644
+index 0000000..530ba61
+--- /dev/null
++++ b/tests/040_PreparedGeometry.phpt
+@@ -0,0 +1,257 @@
++--TEST--
++GEOSPreparedGeometry (Item 18)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class PreparedGeometryTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    private function box($xmin, $ymin, $xmax, $ymax)
++    {
++        return $this->reader()->read(
++            "POLYGON(($xmin $ymin, $xmax $ymin, "
++            . "$xmax $ymax, $xmin $ymax, $xmin $ymin))");
++    }
++
++    public function testClassExists()
++    {
++        $this->assertTrue(class_exists('GEOSPreparedGeometry'));
++    }
++
++    public function testPrepareFactoryReturnsPreparedGeometry()
++    {
++        $g = $this->box(0, 0, 10, 10);
++        $pg = $g->prepare();
++        $this->assertTrue($pg instanceof GEOSPreparedGeometry);
++    }
++
++    public function testConstructLocked()
++    {
++        try {
++            $pg = new GEOSPreparedGeometry();
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains('cannot be constructed directly',
++                $e->getMessage());
++        }
++    }
++
++    public function testContains()
++    {
++        $outer = $this->box(0, 0, 10, 10)->prepare();
++        $inner = $this->box(2, 2, 5, 5);
++        $disjoint = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($outer->contains($inner));
++        $this->assertFalse($outer->contains($disjoint));
++    }
++
++    public function testContainsProperly()
++    {
++        $outer = $this->box(0, 0, 10, 10)->prepare();
++        /* A box sharing the boundary is contained, but NOT properly. */
++        $boundary = $this->box(0, 0, 5, 5);
++        $strictlyInner = $this->box(2, 2, 5, 5);
++
++        $this->assertFalse($outer->containsProperly($boundary));
++        $this->assertTrue($outer->containsProperly($strictlyInner));
++    }
++
++    public function testContainsXY()
++    {
++        $pg = $this->box(0, 0, 10, 10)->prepare();
++        $this->assertTrue($pg->containsXY(5.0, 5.0));
++        $this->assertFalse($pg->containsXY(20.0, 20.0));
++    }
++
++    public function testCoveredBy()
++    {
++        $small = $this->box(2, 2, 5, 5)->prepare();
++        $big = $this->box(0, 0, 10, 10);
++        $other = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($small->coveredBy($big));
++        $this->assertFalse($small->coveredBy($other));
++    }
++
++    public function testCovers()
++    {
++        $big = $this->box(0, 0, 10, 10)->prepare();
++        $small = $this->box(2, 2, 5, 5);
++        $disjoint = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($big->covers($small));
++        $this->assertFalse($big->covers($disjoint));
++    }
++
++    public function testCrosses()
++    {
++        $line = $this->reader()->read("LINESTRING(0 0, 10 10)")->prepare();
++        $crossing = $this->reader()->read("LINESTRING(0 10, 10 0)");
++        $parallel = $this->reader()->read("LINESTRING(0 1, 10 11)");
++
++        $this->assertTrue($line->crosses($crossing));
++        $this->assertFalse($line->crosses($parallel));
++    }
++
++    public function testDisjoint()
++    {
++        $a = $this->box(0, 0, 5, 5)->prepare();
++        $far = $this->box(20, 20, 25, 25);
++        $touching = $this->box(2, 2, 4, 4);
++
++        $this->assertTrue($a->disjoint($far));
++        $this->assertFalse($a->disjoint($touching));
++    }
++
++    public function testIntersects()
++    {
++        $a = $this->box(0, 0, 5, 5)->prepare();
++        $b = $this->box(3, 3, 8, 8);
++        $far = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($a->intersects($b));
++        $this->assertFalse($a->intersects($far));
++    }
++
++    public function testIntersectsXY()
++    {
++        $pg = $this->box(0, 0, 10, 10)->prepare();
++        $this->assertTrue($pg->intersectsXY(5.0, 5.0));
++        $this->assertFalse($pg->intersectsXY(50.0, 50.0));
++    }
++
++    public function testOverlaps()
++    {
++        $a = $this->box(0, 0, 5, 5)->prepare();
++        $b = $this->box(3, 3, 8, 8);
++        $contained = $this->box(1, 1, 2, 2);
++
++        $this->assertTrue($a->overlaps($b));
++        /* Containment is not overlap (per OGC SFS). */
++        $this->assertFalse($a->overlaps($contained));
++    }
++
++    public function testTouches()
++    {
++        $a = $this->box(0, 0, 5, 5)->prepare();
++        $touching = $this->box(5, 0, 10, 5);
++        $far = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($a->touches($touching));
++        $this->assertFalse($a->touches($far));
++    }
++
++    public function testWithin()
++    {
++        $small = $this->box(2, 2, 4, 4)->prepare();
++        $big = $this->box(0, 0, 10, 10);
++        $far = $this->box(20, 20, 25, 25);
++
++        $this->assertTrue($small->within($big));
++        $this->assertFalse($small->within($far));
++    }
++
++    public function testRelateReturnsImString()
++    {
++        $a = $this->box(0, 0, 10, 10)->prepare();
++        $b = $this->box(2, 2, 5, 5);
++
++        $im = $a->relate($b);
++        $this->assertTrue(is_string($im));
++        $this->assertEquals(9, strlen($im));
++    }
++
++    public function testRelatePattern()
++    {
++        $a = $this->box(0, 0, 10, 10)->prepare();
++        $b = $this->box(2, 2, 5, 5);
++
++        /* "T*****FF*" is the OGC pattern for "contains". */
++        $this->assertTrue($a->relatePattern($b, "T*****FF*"));
++
++        $disjoint = $this->box(20, 20, 25, 25);
++        /* Two disjoint boxes should NOT match the contains pattern. */
++        $this->assertFalse($a->relatePattern($disjoint, "T*****FF*"));
++    }
++
++    public function testDistance()
++    {
++        $a = $this->reader()->read("POINT(0 0)")->prepare();
++        $b = $this->reader()->read("POINT(3 4)");
++
++        $d = $a->distance($b);
++        /* Pythagorean distance — exact for these inputs. */
++        $this->assertEquals(5.0, $d);
++    }
++
++    public function testDistanceWithin()
++    {
++        $a = $this->reader()->read("POINT(0 0)")->prepare();
++        $b = $this->reader()->read("POINT(3 4)");
++
++        $this->assertTrue($a->distanceWithin($b, 5.0));
++        $this->assertTrue($a->distanceWithin($b, 6.0));
++        $this->assertFalse($a->distanceWithin($b, 4.0));
++    }
++
++    public function testNearestPoints()
++    {
++        $a = $this->box(0, 0, 5, 5)->prepare();
++        $b = $this->box(10, 10, 12, 12);
++
++        $cs = $a->nearestPoints($b);
++        $this->assertTrue($cs instanceof GEOSCoordSeq);
++        $this->assertEquals(2, $cs->getSize());
++    }
++
++    /**
++     * Lifecycle: prepare from a temp source geometry, drop the source
++     * variable, verify the prepared geom still works (refcount kept it alive).
++     */
++    public function testLifecycleRefcount()
++    {
++        $source = $this->box(0, 0, 10, 10);
++        $pg = $source->prepare();
++
++        unset($source);
++        if (function_exists('gc_collect_cycles')) {
++            gc_collect_cycles();
++        }
++
++        /* Source should still be alive courtesy of the prepared-geom relay. */
++        $probe = $this->box(2, 2, 5, 5);
++        $this->assertTrue($pg->contains($probe));
++    }
++}
++
++PreparedGeometryTest::run();
++
++?>
++--EXPECT--
++PreparedGeometryTest->testClassExists	OK
++PreparedGeometryTest->testPrepareFactoryReturnsPreparedGeometry	OK
++PreparedGeometryTest->testConstructLocked	OK
++PreparedGeometryTest->testContains	OK
++PreparedGeometryTest->testContainsProperly	OK
++PreparedGeometryTest->testContainsXY	OK
++PreparedGeometryTest->testCoveredBy	OK
++PreparedGeometryTest->testCovers	OK
++PreparedGeometryTest->testCrosses	OK
++PreparedGeometryTest->testDisjoint	OK
++PreparedGeometryTest->testIntersects	OK
++PreparedGeometryTest->testIntersectsXY	OK
++PreparedGeometryTest->testOverlaps	OK
++PreparedGeometryTest->testTouches	OK
++PreparedGeometryTest->testWithin	OK
++PreparedGeometryTest->testRelateReturnsImString	OK
++PreparedGeometryTest->testRelatePattern	OK
++PreparedGeometryTest->testDistance	OK
++PreparedGeometryTest->testDistanceWithin	OK
++PreparedGeometryTest->testNearestPoints	OK
++PreparedGeometryTest->testLifecycleRefcount	OK
+diff --git a/tests/050_Transform.phpt b/tests/050_Transform.phpt
+new file mode 100644
+index 0000000..6e36aab
+--- /dev/null
++++ b/tests/050_Transform.phpt
+@@ -0,0 +1,122 @@
++--TEST--
++GEOSGeometry coordinate-transform callbacks (Item 19)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class TransformTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++    private function writer() {
++        $w = new GEOSWKTWriter();
++        $w->setRoundingPrecision(2);
++        $w->setTrim(true);
++        return $w;
++    }
++
++    public function testTransformXYTranslatePoint()
++    {
++        $p = $this->reader()->read("POINT(1 2)");
++        $shifted = $p->transformXY(function ($x, $y) {
++            return [$x + 10, $y + 20];
++        });
++        $this->assertEquals("POINT (11 22)", $this->writer()->write($shifted));
++    }
++
++    public function testTransformXYScaleLineString()
++    {
++        $line = $this->reader()->read("LINESTRING(0 0, 1 1, 2 0)");
++        $scaled = $line->transformXY(function ($x, $y) {
++            return [$x * 2, $y * 3];
++        });
++        $this->assertEquals("LINESTRING (0 0, 2 3, 4 0)",
++            $this->writer()->write($scaled));
++    }
++
++    public function testTransformXYZ()
++    {
++        $p = $this->reader()->read("POINT Z (1 2 3)");
++        $shifted = $p->transformXYZ(function ($x, $y, $z) {
++            return [$x + 1, $y + 1, $z * 2];
++        });
++
++        $w = new GEOSWKTWriter();
++        $w->setRoundingPrecision(2);
++        $w->setTrim(true);
++        $w->setOutputDimension(3);
++        $this->assertEquals("POINT Z (2 3 6)", $w->write($shifted));
++    }
++
++    public function testTransformXYReturnsNewGeometry()
++    {
++        $p = $this->reader()->read("POINT(0 0)");
++        $shifted = $p->transformXY(function ($x, $y) {
++            return [$x + 1, $y + 1];
++        });
++        /* Original is untouched (immutability of geometries). */
++        $this->assertEquals("POINT (0 0)", $this->writer()->write($p));
++        $this->assertEquals("POINT (1 1)", $this->writer()->write($shifted));
++    }
++
++    public function testTransformXYThrowingCallbackPropagates()
++    {
++        $p = $this->reader()->read("POINT(1 2)");
++        try {
++            $p->transformXY(function ($x, $y) {
++                throw new Exception("boom");
++            });
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertEquals("boom", $e->getMessage());
++        }
++    }
++
++    public function testTransformXYNonArrayReturnThrows()
++    {
++        $p = $this->reader()->read("POINT(1 2)");
++        try {
++            $p->transformXY(function ($x, $y) { return 42; });
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains("must return an array", $e->getMessage());
++        }
++    }
++
++    public function testTransformXYWrongLengthReturnThrows()
++    {
++        $p = $this->reader()->read("POINT(1 2)");
++        try {
++            $p->transformXY(function ($x, $y) { return [$x]; });
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains("wrong length", $e->getMessage());
++        }
++    }
++
++    public function testTransformXYNotCallableThrows()
++    {
++        $p = $this->reader()->read("POINT(1 2)");
++        try {
++            $p->transformXY("definitely_not_a_function_xyzzy");
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains("not a valid callable", $e->getMessage());
++        }
++    }
++}
++
++TransformTest::run();
++
++?>
++--EXPECT--
++TransformTest->testTransformXYTranslatePoint	OK
++TransformTest->testTransformXYScaleLineString	OK
++TransformTest->testTransformXYZ	OK
++TransformTest->testTransformXYReturnsNewGeometry	OK
++TransformTest->testTransformXYThrowingCallbackPropagates	OK
++TransformTest->testTransformXYNonArrayReturnThrows	OK
++TransformTest->testTransformXYWrongLengthReturnThrows	OK
++TransformTest->testTransformXYNotCallableThrows	OK
+diff --git a/tests/060_Misc.phpt b/tests/060_Misc.phpt
+new file mode 100644
+index 0000000..24b4038
+--- /dev/null
++++ b/tests/060_Misc.phpt
+@@ -0,0 +1,134 @@
++--TEST--
++P2 fillers — hilbertCode / orientationIndex / segmentIntersection / gridIntersectionFractions (Item 20)
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class MiscTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    private function box($xmin, $ymin, $xmax, $ymax)
++    {
++        return $this->reader()->read(
++            "POLYGON(($xmin $ymin, $xmax $ymin, "
++            . "$xmax $ymax, $xmin $ymax, $xmin $ymin))");
++    }
++
++    public function testHilbertCodeReturnsInt()
++    {
++        $extent = $this->box(0, 0, 100, 100);
++        $point = $this->reader()->read("POINT(50 50)");
++
++        $code = $point->hilbertCode($extent, 5);
++        $this->assertTrue(is_int($code));
++        $this->assertTrue($code >= 0);
++    }
++
++    public function testHilbertCodeDifferentPointsDifferentCodes()
++    {
++        $extent = $this->box(0, 0, 100, 100);
++        $a = $this->reader()->read("POINT(5 5)");
++        $b = $this->reader()->read("POINT(95 95)");
++
++        $codeA = $a->hilbertCode($extent, 5);
++        $codeB = $b->hilbertCode($extent, 5);
++        $this->assertTrue($codeA !== $codeB);
++    }
++
++    public function testHilbertCodeBadLevelThrows()
++    {
++        $extent = $this->box(0, 0, 100, 100);
++        $point = $this->reader()->read("POINT(50 50)");
++        try {
++            $point->hilbertCode($extent, 17);
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains("level", $e->getMessage());
++        }
++    }
++
++    public function testOrientationIndexCollinear()
++    {
++        /* (0,0)→(2,2): point (1,1) is exactly on the line. */
++        $idx = GEOSOrientationIndex(0, 0, 2, 2, 1, 1);
++        $this->assertEquals(0, $idx);
++    }
++
++    public function testOrientationIndexCCW()
++    {
++        /* (0,0)→(1,0): point (0,1) is to the left → CCW (+1). */
++        $idx = GEOSOrientationIndex(0, 0, 1, 0, 0, 1);
++        $this->assertEquals(1, $idx);
++    }
++
++    public function testOrientationIndexCW()
++    {
++        /* (0,0)→(1,0): point (0,-1) is to the right → CW (-1). */
++        $idx = GEOSOrientationIndex(0, 0, 1, 0, 0, -1);
++        $this->assertEquals(-1, $idx);
++    }
++
++    public function testSegmentIntersectionCrossing()
++    {
++        /* (0,0)→(2,2) crossed by (0,2)→(2,0) → meets at (1,1). */
++        $r = GEOSSegmentIntersection(0, 0, 2, 2, 0, 2, 2, 0);
++        $this->assertTrue(is_array($r));
++        $this->assertEquals(2, count($r));
++        $this->assertEquals(1.0, $r[0]);
++        $this->assertEquals(1.0, $r[1]);
++    }
++
++    public function testSegmentIntersectionParallelReturnsNull()
++    {
++        /* Two parallel horizontal segments — no intersection. */
++        $r = GEOSSegmentIntersection(0, 0, 1, 0, 0, 1, 1, 1);
++        $this->assertNull($r);
++    }
++
++    public function testGridIntersectionFractionsBasic()
++    {
++        /* A polygon covering [0,10]x[0,10] inside a 10x10 grid bounded by
++         * [0,10]x[0,10] should yield ~1.0 in every cell. We do not assert
++         * on exact float equality; just that the array is the right shape
++         * and values are in [0,1]. */
++        $g = $this->box(0, 0, 10, 10);
++        $arr = $g->gridIntersectionFractions(0, 0, 10, 10, 5, 5);
++        $this->assertTrue(is_array($arr));
++        $this->assertEquals(25, count($arr));
++        foreach ($arr as $v) {
++            if ($v < 0.0 || $v > 1.0001) {
++                throw new Exception("fraction out of [0,1]: $v");
++            }
++        }
++    }
++
++    public function testGridIntersectionFractionsBadDims()
++    {
++        $g = $this->box(0, 0, 10, 10);
++        try {
++            $g->gridIntersectionFractions(0, 0, 10, 10, 0, 5);
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains("nx and ny must be > 0", $e->getMessage());
++        }
++    }
++}
++
++MiscTest::run();
++
++?>
++--EXPECT--
++MiscTest->testHilbertCodeReturnsInt	OK
++MiscTest->testHilbertCodeDifferentPointsDifferentCodes	OK
++MiscTest->testHilbertCodeBadLevelThrows	OK
++MiscTest->testOrientationIndexCollinear	OK
++MiscTest->testOrientationIndexCCW	OK
++MiscTest->testOrientationIndexCW	OK
++MiscTest->testSegmentIntersectionCrossing	OK
++MiscTest->testSegmentIntersectionParallelReturnsNull	OK
++MiscTest->testGridIntersectionFractionsBasic	OK
++MiscTest->testGridIntersectionFractionsBadDims	OK
+-- 
+2.34.1
+

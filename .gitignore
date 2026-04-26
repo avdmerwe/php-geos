@@ -54,6 +54,7 @@ tests/*.mem
 tests/*.out
 tests/*.diff
 tests/*.php
+!tests/TestHelper.php
 tests/*.exp
 tests/*.sh
 tests/*/*.log
@@ -72,3 +73,11 @@ tests/*/*/*.exp
 tests/*/*/*.sh
 tmp-php.ini
 !/docker/**/Makefile
+debian/.debhelper/
+debian/autoreconf.after
+debian/autoreconf.before
+debian/debhelper-build-stamp
+debian/files
+debian/*.debhelper
+debian/*.substvars
+debian/php-geos/

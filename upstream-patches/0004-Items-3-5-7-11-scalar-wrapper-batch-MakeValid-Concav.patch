@@ -1,0 +1,2801 @@
+From e3e6e84a4c29ffb658003e8fe26aefd4c9b5bd00 Mon Sep 17 00:00:00 2001
+From: Abraham van der Merwe <abz@frogfoot.com>
+Date: Sun, 26 Apr 2026 16:34:50 +0200
+Subject: [PATCH 4/8] Items 3-5,7-11: scalar-wrapper batch (MakeValid,
+ ConcaveHull, PrecOverlays, WKB flavor, hull/metric/distance/linear/utility
+ extras)
+
+36 new methods, 4 new standalone PHP functions, 4 modified methods,
+6 new module constants. 8 new .phpt files (78 sub-tests).
+
+Item 3 - MakeValid family
+  GEOSGeometry::makeValid($params = [])  with 'method' linework|structure
+                                            and 'keep_collapsed' bool
+  Constants: GEOS_MAKE_VALID_LINEWORK, GEOS_MAKE_VALID_STRUCTURE
+
+Item 4 - Concave hull family
+  GEOSGeometry::concaveHull($ratio, $allowHoles = false)
+  GEOSGeometry::concaveHullByLength($maxLength, $allowHoles = false)
+  GEOSGeometry::concaveHullOfPolygons($ratio, $isTight = true, $allowHoles = false)
+  GEOSGeometry::polygonHullSimplify($isOuter, $param, ?$mode = null)
+  Constants: GEOS_HULL_PARAM_VERTEX_NUM_FRACTION,
+             GEOS_HULL_PARAM_AREA_DELTA_RATIO
+
+Item 5 - Precision-grid overlays (extend existing methods, BC-safe)
+  intersection($other, ?$gridSize = null)
+  difference($other, ?$gridSize = null)
+  symDifference($other, ?$gridSize = null)
+  union(?$other = null, ?$gridSize = null)
+
+Item 7 - WKB flavor + reader fix-structure
+  GEOSWKBWriter::setFlavor($flavor), getFlavor()
+  GEOSWKTReader::setFixStructure($fix)
+  GEOSWKBReader::setFixStructure($fix)
+  Constants: GEOSWKB_EXTENDED (default), GEOSWKB_ISO
+
+Item 8 - Hull / metric extras
+  minimumBoundingCircle, minimumRotatedRectangle, minimumWidth,
+  minimumClearance, minimumClearanceLine, maximumInscribedCircle($tol),
+  largestEmptyCircle($tol, ?$boundary)
+
+Item 9 - Distance / metric extras
+  distanceWithin, distanceIndexed, nearestPoints (returns GEOSCoordSeq),
+  frechetDistance, frechetDistanceDensify, hausdorffDistanceDensify
+
+Item 10 - Linear referencing extras
+  lineSubstring, lineMergeDirected
+
+Item 11 - Construction / utility extras
+  reverse, densify, removeRepeatedPoints, orientPolygons,
+  equalsIdentical, getXMin, getXMax, getYMin, getYMax, getExtent,
+  buildArea
+  Standalone: GEOSPolygonizeValid, GEOSPolygonizeCutEdges,
+              GEOSBuildArea, GEOSDisjointSubsetUnion
+
+15/15 .phpt tests pass.
+---
+ arginfo.h                         |  136 ++-
+ geos.c                            | 1325 +++++++++++++++++++++++++----
+ tests/010_MakeValid.phpt          |   97 +++
+ tests/011_ConcaveHull.phpt        |  120 +++
+ tests/012_PrecOverlays.phpt       |  123 +++
+ tests/014_FixStructure.phpt       |  123 +++
+ tests/015_HullExtras.phpt         |  110 +++
+ tests/016_DistanceExtras.phpt     |  126 +++
+ tests/017_LinearReferencing.phpt  |   75 ++
+ tests/018_ConstructionExtras.phpt |  189 ++++
+ 10 files changed, 2250 insertions(+), 174 deletions(-)
+ create mode 100644 tests/010_MakeValid.phpt
+ create mode 100644 tests/011_ConcaveHull.phpt
+ create mode 100644 tests/012_PrecOverlays.phpt
+ create mode 100644 tests/014_FixStructure.phpt
+ create mode 100644 tests/015_HullExtras.phpt
+ create mode 100644 tests/016_DistanceExtras.phpt
+ create mode 100644 tests/017_LinearReferencing.phpt
+ create mode 100644 tests/018_ConstructionExtras.phpt
+
+diff --git a/arginfo.h b/arginfo.h
+index 9ebdbd5..88be3ad 100644
+--- a/arginfo.h
++++ b/arginfo.h
+@@ -64,18 +64,28 @@ ZEND_END_ARG_INFO()
+ 
+ #define arginfo_Geometry_envelope        arginfo_void
+ 
+-#define arginfo_Geometry_intersection    arginfo_geom
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_intersection, 0, 0, 1)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, gridSize)
++ZEND_END_ARG_INFO()
+ 
+ #define arginfo_Geometry_convexHull      arginfo_void
+ 
+-#define arginfo_Geometry_difference      arginfo_geom
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_difference, 0, 0, 1)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, gridSize)
++ZEND_END_ARG_INFO()
+ 
+-#define arginfo_Geometry_symDifference   arginfo_geom
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_symDifference, 0, 0, 1)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, gridSize)
++ZEND_END_ARG_INFO()
+ 
+ #define arginfo_Geometry_boundary        arginfo_void
+ 
+ ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_union, 0, 0, 0)
+     ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, gridSize)
+ ZEND_END_ARG_INFO()
+ 
+ #define arginfo_Geometry_pointOnSurface  arginfo_void
+@@ -388,3 +398,123 @@ ZEND_END_ARG_INFO()
+ 
+ #define arginfo_CoordSeq_copyToArrays    arginfo_void
+ 
++
++/* -- Item 3: MakeValid family -------------------- */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_makeValid, 0, 0, 0)
++    ZEND_ARG_INFO(0, params)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 4: Concave hull family ----------------- */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHull, 0, 0, 1)
++    ZEND_ARG_INFO(0, ratio)
++    ZEND_ARG_INFO(0, allowHoles)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHullByLength, 0, 0, 1)
++    ZEND_ARG_INFO(0, maxLength)
++    ZEND_ARG_INFO(0, allowHoles)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_concaveHullOfPolygons, 0, 0, 1)
++    ZEND_ARG_INFO(0, ratio)
++    ZEND_ARG_INFO(0, isTight)
++    ZEND_ARG_INFO(0, allowHoles)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_polygonHullSimplify, 0, 0, 2)
++    ZEND_ARG_INFO(0, isOuter)
++    ZEND_ARG_INFO(0, param)
++    ZEND_ARG_INFO(0, mode)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 7: WKB flavor + reader fix-structure --- */
++
++#define arginfo_WKBWriter_setFlavor          arginfo_num
++#define arginfo_WKBWriter_getFlavor          arginfo_void
++#define arginfo_WKTReader_setFixStructure    arginfo_num
++#define arginfo_WKBReader_setFixStructure    arginfo_num
++
++
++/* -- Item 8: Hull / metric extras ---------------- */
++
++#define arginfo_Geometry_minimumBoundingCircle    arginfo_void
++#define arginfo_Geometry_minimumRotatedRectangle  arginfo_void
++#define arginfo_Geometry_minimumWidth             arginfo_void
++#define arginfo_Geometry_minimumClearance         arginfo_void
++#define arginfo_Geometry_minimumClearanceLine     arginfo_void
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_maximumInscribedCircle, 0, 0, 1)
++    ZEND_ARG_INFO(0, tol)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_largestEmptyCircle, 0, 0, 1)
++    ZEND_ARG_INFO(0, tol)
++    ZEND_ARG_INFO(0, boundary)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 9: Distance / metric extras ------------ */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_distanceWithin, 0, 0, 2)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, maxDist)
++ZEND_END_ARG_INFO()
++
++#define arginfo_Geometry_distanceIndexed     arginfo_geom
++#define arginfo_Geometry_nearestPoints       arginfo_geom
++#define arginfo_Geometry_frechetDistance     arginfo_geom
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_frechetDistanceDensify, 0, 0, 2)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, frac)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_hausdorffDistanceDensify, 0, 0, 2)
++    ZEND_ARG_INFO(0, geom)
++    ZEND_ARG_INFO(0, frac)
++ZEND_END_ARG_INFO()
++
++
++/* -- Item 10: Linear referencing extras ---------- */
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_lineSubstring, 0, 0, 2)
++    ZEND_ARG_INFO(0, startFrac)
++    ZEND_ARG_INFO(0, endFrac)
++ZEND_END_ARG_INFO()
++
++#define arginfo_Geometry_lineMergeDirected   arginfo_void
++
++
++/* -- Item 11: Construction / utility extras ------ */
++
++#define arginfo_Geometry_reverse             arginfo_void
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_densify, 0, 0, 1)
++    ZEND_ARG_INFO(0, dist)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_removeRepeatedPoints, 0, 0, 0)
++    ZEND_ARG_INFO(0, tol)
++ZEND_END_ARG_INFO()
++
++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_orientPolygons, 0, 0, 0)
++    ZEND_ARG_INFO(0, exterior_cw)
++ZEND_END_ARG_INFO()
++
++#define arginfo_Geometry_equalsIdentical     arginfo_geom
++#define arginfo_Geometry_getXMin             arginfo_void
++#define arginfo_Geometry_getXMax             arginfo_void
++#define arginfo_Geometry_getYMin             arginfo_void
++#define arginfo_Geometry_getYMax             arginfo_void
++#define arginfo_Geometry_getExtent           arginfo_void
++#define arginfo_Geometry_buildArea           arginfo_void
++
++#define arginfo_GEOSPolygonizeValid          arginfo_geom
++#define arginfo_GEOSPolygonizeCutEdges       arginfo_geom
++#define arginfo_GEOSBuildArea                arginfo_geom
++#define arginfo_GEOSDisjointSubsetUnion      arginfo_geom
++
+diff --git a/geos.c b/geos.c
+index 692f12a..60b0d19 100644
+--- a/geos.c
++++ b/geos.c
+@@ -45,6 +45,10 @@ PHP_MINFO_FUNCTION(geos);
+ PHP_FUNCTION(GEOSVersion);
+ PHP_FUNCTION(GEOSPolygonize);
+ PHP_FUNCTION(GEOSLineMerge);
++PHP_FUNCTION(GEOSPolygonizeValid);
++PHP_FUNCTION(GEOSPolygonizeCutEdges);
++PHP_FUNCTION(GEOSBuildArea);
++PHP_FUNCTION(GEOSDisjointSubsetUnion);
+ 
+ #ifdef HAVE_GEOS_SHARED_PATHS
+ PHP_FUNCTION(GEOSSharedPaths);
+@@ -89,6 +93,10 @@ static zend_function_entry geos_functions[] = {
+     PHP_FE(GEOSVersion, arginfo_GEOSVersion)
+     PHP_FE(GEOSPolygonize, arginfo_GEOSPolygonize)
+     PHP_FE(GEOSLineMerge, arginfo_GEOSLineMerge)
++    PHP_FE(GEOSPolygonizeValid, arginfo_GEOSPolygonizeValid)
++    PHP_FE(GEOSPolygonizeCutEdges, arginfo_GEOSPolygonizeCutEdges)
++    PHP_FE(GEOSBuildArea, arginfo_GEOSBuildArea)
++    PHP_FE(GEOSDisjointSubsetUnion, arginfo_GEOSDisjointSubsetUnion)
+ 
+ #   ifdef HAVE_GEOS_SHARED_PATHS
+     PHP_FE(GEOSSharedPaths, arginfo_GEOSSharedPaths)
+@@ -439,6 +447,39 @@ PHP_METHOD(Geometry, voronoiDiagram);
+ PHP_METHOD(Geometry, clipByRect);
+ #endif
+ 
++/* Items 3..11 — added methods */
++PHP_METHOD(Geometry, makeValid);
++PHP_METHOD(Geometry, concaveHull);
++PHP_METHOD(Geometry, concaveHullByLength);
++PHP_METHOD(Geometry, concaveHullOfPolygons);
++PHP_METHOD(Geometry, polygonHullSimplify);
++PHP_METHOD(Geometry, minimumBoundingCircle);
++PHP_METHOD(Geometry, minimumRotatedRectangle);
++PHP_METHOD(Geometry, minimumWidth);
++PHP_METHOD(Geometry, minimumClearance);
++PHP_METHOD(Geometry, minimumClearanceLine);
++PHP_METHOD(Geometry, maximumInscribedCircle);
++PHP_METHOD(Geometry, largestEmptyCircle);
++PHP_METHOD(Geometry, distanceWithin);
++PHP_METHOD(Geometry, distanceIndexed);
++PHP_METHOD(Geometry, nearestPoints);
++PHP_METHOD(Geometry, frechetDistance);
++PHP_METHOD(Geometry, frechetDistanceDensify);
++PHP_METHOD(Geometry, hausdorffDistanceDensify);
++PHP_METHOD(Geometry, lineSubstring);
++PHP_METHOD(Geometry, lineMergeDirected);
++PHP_METHOD(Geometry, reverse);
++PHP_METHOD(Geometry, densify);
++PHP_METHOD(Geometry, removeRepeatedPoints);
++PHP_METHOD(Geometry, orientPolygons);
++PHP_METHOD(Geometry, equalsIdentical);
++PHP_METHOD(Geometry, getXMin);
++PHP_METHOD(Geometry, getXMax);
++PHP_METHOD(Geometry, getYMin);
++PHP_METHOD(Geometry, getYMax);
++PHP_METHOD(Geometry, getExtent);
++PHP_METHOD(Geometry, buildArea);
++
+ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
+     PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
+@@ -583,10 +624,46 @@ static zend_function_entry Geometry_methods[] = {
+     PHP_ME(Geometry, clipByRect, arginfo_Geometry_clipByRect, 0)
+ #   endif
+ 
++    /* Items 3..11 — added methods */
++    PHP_ME(Geometry, makeValid, arginfo_Geometry_makeValid, 0)
++    PHP_ME(Geometry, concaveHull, arginfo_Geometry_concaveHull, 0)
++    PHP_ME(Geometry, concaveHullByLength, arginfo_Geometry_concaveHullByLength, 0)
++    PHP_ME(Geometry, concaveHullOfPolygons, arginfo_Geometry_concaveHullOfPolygons, 0)
++    PHP_ME(Geometry, polygonHullSimplify, arginfo_Geometry_polygonHullSimplify, 0)
++    PHP_ME(Geometry, minimumBoundingCircle, arginfo_Geometry_minimumBoundingCircle, 0)
++    PHP_ME(Geometry, minimumRotatedRectangle, arginfo_Geometry_minimumRotatedRectangle, 0)
++    PHP_ME(Geometry, minimumWidth, arginfo_Geometry_minimumWidth, 0)
++    PHP_ME(Geometry, minimumClearance, arginfo_Geometry_minimumClearance, 0)
++    PHP_ME(Geometry, minimumClearanceLine, arginfo_Geometry_minimumClearanceLine, 0)
++    PHP_ME(Geometry, maximumInscribedCircle, arginfo_Geometry_maximumInscribedCircle, 0)
++    PHP_ME(Geometry, largestEmptyCircle, arginfo_Geometry_largestEmptyCircle, 0)
++    PHP_ME(Geometry, distanceWithin, arginfo_Geometry_distanceWithin, 0)
++    PHP_ME(Geometry, distanceIndexed, arginfo_Geometry_distanceIndexed, 0)
++    PHP_ME(Geometry, nearestPoints, arginfo_Geometry_nearestPoints, 0)
++    PHP_ME(Geometry, frechetDistance, arginfo_Geometry_frechetDistance, 0)
++    PHP_ME(Geometry, frechetDistanceDensify, arginfo_Geometry_frechetDistanceDensify, 0)
++    PHP_ME(Geometry, hausdorffDistanceDensify, arginfo_Geometry_hausdorffDistanceDensify, 0)
++    PHP_ME(Geometry, lineSubstring, arginfo_Geometry_lineSubstring, 0)
++    PHP_ME(Geometry, lineMergeDirected, arginfo_Geometry_lineMergeDirected, 0)
++    PHP_ME(Geometry, reverse, arginfo_Geometry_reverse, 0)
++    PHP_ME(Geometry, densify, arginfo_Geometry_densify, 0)
++    PHP_ME(Geometry, removeRepeatedPoints, arginfo_Geometry_removeRepeatedPoints, 0)
++    PHP_ME(Geometry, orientPolygons, arginfo_Geometry_orientPolygons, 0)
++    PHP_ME(Geometry, equalsIdentical, arginfo_Geometry_equalsIdentical, 0)
++    PHP_ME(Geometry, getXMin, arginfo_Geometry_getXMin, 0)
++    PHP_ME(Geometry, getXMax, arginfo_Geometry_getXMax, 0)
++    PHP_ME(Geometry, getYMin, arginfo_Geometry_getYMin, 0)
++    PHP_ME(Geometry, getYMax, arginfo_Geometry_getYMax, 0)
++    PHP_ME(Geometry, getExtent, arginfo_Geometry_getExtent, 0)
++    PHP_ME(Geometry, buildArea, arginfo_Geometry_buildArea, 0)
++
+     {NULL, NULL, NULL}
+ };
+ 
+ static zend_class_entry *Geometry_ce_ptr;
++/* forward declared for use by Geometry::nearestPoints; defined with the
++ * GEOSCoordSeq class below. */
++static zend_class_entry *CoordSeq_ce_ptr;
+ 
+ static zend_object_handlers Geometry_object_handlers;
+ 
+@@ -1046,16 +1123,30 @@ PHP_METHOD(Geometry, intersection)
+     GEOSGeometry *other;
+     GEOSGeometry *ret;
+     zval *zobj;
++    double gridSize = 0.0;
++    int has_gridSize = 0;
+ 
+     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+-            == FAILURE) {
+-        RETURN_NULL();
++    if (ZEND_NUM_ARGS() >= 2) {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
++                &gridSize) == FAILURE) {
++            RETURN_NULL();
++        }
++        has_gridSize = 1;
++    } else {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++                == FAILURE) {
++            RETURN_NULL();
++        }
+     }
+     other = getRelay(zobj, Geometry_ce_ptr);
+ 
+-    ret = GEOSIntersection_r(GEOS_G(handle), this, other);
++    if (has_gridSize) {
++        ret = GEOSIntersectionPrec_r(GEOS_G(handle), this, other, gridSize);
++    } else {
++        ret = GEOSIntersection_r(GEOS_G(handle), this, other);
++    }
+     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
+ 
+     /* return_value is a zval */
+@@ -1110,16 +1201,30 @@ PHP_METHOD(Geometry, difference)
+     GEOSGeometry *other;
+     GEOSGeometry *ret;
+     zval *zobj;
++    double gridSize = 0.0;
++    int has_gridSize = 0;
+ 
+     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+-            == FAILURE) {
+-        RETURN_NULL();
++    if (ZEND_NUM_ARGS() >= 2) {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
++                &gridSize) == FAILURE) {
++            RETURN_NULL();
++        }
++        has_gridSize = 1;
++    } else {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++                == FAILURE) {
++            RETURN_NULL();
++        }
+     }
+     other = getRelay(zobj, Geometry_ce_ptr);
+ 
+-    ret = GEOSDifference_r(GEOS_G(handle), this, other);
++    if (has_gridSize) {
++        ret = GEOSDifferencePrec_r(GEOS_G(handle), this, other, gridSize);
++    } else {
++        ret = GEOSDifference_r(GEOS_G(handle), this, other);
++    }
+     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
+ 
+     /* return_value is a zval */
+@@ -1133,16 +1238,30 @@ PHP_METHOD(Geometry, symDifference)
+     GEOSGeometry *other;
+     GEOSGeometry *ret;
+     zval *zobj;
++    double gridSize = 0.0;
++    int has_gridSize = 0;
+ 
+     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
+-            == FAILURE) {
+-        RETURN_NULL();
++    if (ZEND_NUM_ARGS() >= 2) {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od", &zobj,
++                &gridSize) == FAILURE) {
++            RETURN_NULL();
++        }
++        has_gridSize = 1;
++    } else {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++                == FAILURE) {
++            RETURN_NULL();
++        }
+     }
+     other = getRelay(zobj, Geometry_ce_ptr);
+ 
+-    ret = GEOSSymDifference_r(GEOS_G(handle), this, other);
++    if (has_gridSize) {
++        ret = GEOSSymDifferencePrec_r(GEOS_G(handle), this, other, gridSize);
++    } else {
++        ret = GEOSSymDifference_r(GEOS_G(handle), this, other);
++    }
+     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
+ 
+     /* return_value is a zval */
+@@ -1166,8 +1285,9 @@ PHP_METHOD(Geometry, boundary)
+ }
+ 
+ /**
+- * GEOSGeometry::union(otherGeom)
+  * GEOSGeometry::union()
++ * GEOSGeometry::union(otherGeom)
++ * GEOSGeometry::union(otherGeom = null, gridSize)
+  */
+ PHP_METHOD(Geometry, union)
+ {
+@@ -1175,23 +1295,41 @@ PHP_METHOD(Geometry, union)
+     GEOSGeometry *other;
+     GEOSGeometry *ret;
+     zval *zobj = NULL;
++    double gridSize = 0.0;
++    int has_gridSize = 0;
+ 
+     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|o", &zobj)
+-            == FAILURE) {
+-        RETURN_NULL();
++    if (ZEND_NUM_ARGS() >= 2) {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o!d", &zobj,
++                &gridSize) == FAILURE) {
++            RETURN_NULL();
++        }
++        has_gridSize = 1;
++    } else {
++        if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|o!", &zobj)
++                == FAILURE) {
++            RETURN_NULL();
++        }
+     }
+ 
+     if ( zobj ) {
+         other = getRelay(zobj, Geometry_ce_ptr);
+-        ret = GEOSUnion_r(GEOS_G(handle), this, other);
++        if (has_gridSize) {
++            ret = GEOSUnionPrec_r(GEOS_G(handle), this, other, gridSize);
++        } else {
++            ret = GEOSUnion_r(GEOS_G(handle), this, other);
++        }
+     } else {
++        if (has_gridSize) {
++            ret = GEOSUnaryUnionPrec_r(GEOS_G(handle), this, gridSize);
++        } else {
+ #       ifdef HAVE_GEOS_UNARY_UNION
+-        ret = GEOSUnaryUnion_r(GEOS_G(handle), this);
++            ret = GEOSUnaryUnion_r(GEOS_G(handle), this);
+ #       else
+-        ret = GEOSUnionCascaded_r(GEOS_G(handle), this);
++            ret = GEOSUnionCascaded_r(GEOS_G(handle), this);
+ #       endif
++        }
+     }
+ 
+     if ( ! ret ) RETURN_NULL(); /* should get an exception first */
+@@ -2417,206 +2555,864 @@ PHP_METHOD(Geometry, node)
+ 
+ 
+ 
+-/* -- class GEOSCoordSeq -------------------- */
++/* -- Items 3..11: scalar wrappers on GEOSGeometry -------------------- */
+ 
+-/*
+- * Lifecycle / ownership invariants for GEOSCoordSeq:
+- *
+- *  1. A PHP GEOSCoordSeq object owns its underlying GEOSCoordSequence*. The
+- *     dtor calls GEOSCoordSeq_destroy_r on the relay pointer (if non-NULL).
++/**
++ * GEOSGeometry::makeValid(array $params = [])
+  *
+- *  2. GEOS C API functions that build a geometry from a coord-seq
+- *     (GEOSGeom_createPoint_r, _createLineString_r, _createLinearRing_r,
+- *     curved-geometry constructors, etc.) TRANSFER ownership of the coord-seq
+- *     into the new geometry. After such a handoff the PHP coord-seq object's
+- *     relay must be set to NULL via setRelay(zv, NULL) so the dtor does not
+- *     double-free. (Used by item 12/16 factory statics.)
++ * Empty params -> GEOSMakeValid_r.
++ * Otherwise, build a GEOSMakeValidParams via setMethod / setKeepCollapsed
++ * and invoke GEOSMakeValidWithParams_r.
+  *
+- *  3. GEOSGeom_getCoordSeq_r returns a NON-OWNING const pointer to a coord-seq
+- *     internal to a geometry. To wrap that as a PHP GEOSCoordSeq object we
+- *     must FIRST clone via GEOSCoordSeq_clone_r so the PHP object owns its
+- *     own copy. See GEOSGeometry::getCoordSeq() below for an example.
++ * Recognised keys:
++ *   'method'         => "linework" or "structure" (string)
++ *   'keep_collapsed' => bool
+  */
++PHP_METHOD(Geometry, makeValid)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    zval *params_val = NULL;
++    HashTable *params;
++    GEOS_PHP_ZVAL data;
++    zend_string *key;
++    zend_ulong index;
+ 
+-PHP_METHOD(CoordSeq, __construct);
+-PHP_METHOD(CoordSeq, getSize);
+-PHP_METHOD(CoordSeq, getDimensions);
+-PHP_METHOD(CoordSeq, hasZ);
+-PHP_METHOD(CoordSeq, hasM);
+-PHP_METHOD(CoordSeq, isCCW);
+-PHP_METHOD(CoordSeq, setX);
+-PHP_METHOD(CoordSeq, setY);
+-PHP_METHOD(CoordSeq, setZ);
+-PHP_METHOD(CoordSeq, setM);
+-PHP_METHOD(CoordSeq, getX);
+-PHP_METHOD(CoordSeq, getY);
+-PHP_METHOD(CoordSeq, getZ);
+-PHP_METHOD(CoordSeq, getM);
+-PHP_METHOD(CoordSeq, setXY);
+-PHP_METHOD(CoordSeq, setXYZ);
+-PHP_METHOD(CoordSeq, getXY);
+-PHP_METHOD(CoordSeq, getXYZ);
+-PHP_METHOD(CoordSeq, copyFromArrays);
+-PHP_METHOD(CoordSeq, copyToArrays);
+-
+-static zend_function_entry CoordSeq_methods[] = {
+-    PHP_ME(CoordSeq, __construct, arginfo_CoordSeq_construct, 0)
+-    PHP_ME(CoordSeq, getSize, arginfo_CoordSeq_getSize, 0)
+-    PHP_ME(CoordSeq, getDimensions, arginfo_CoordSeq_getDimensions, 0)
+-    PHP_ME(CoordSeq, hasZ, arginfo_CoordSeq_hasZ, 0)
+-    PHP_ME(CoordSeq, hasM, arginfo_CoordSeq_hasM, 0)
+-    PHP_ME(CoordSeq, isCCW, arginfo_CoordSeq_isCCW, 0)
+-    PHP_ME(CoordSeq, setX, arginfo_CoordSeq_setX, 0)
+-    PHP_ME(CoordSeq, setY, arginfo_CoordSeq_setY, 0)
+-    PHP_ME(CoordSeq, setZ, arginfo_CoordSeq_setZ, 0)
+-    PHP_ME(CoordSeq, setM, arginfo_CoordSeq_setM, 0)
+-    PHP_ME(CoordSeq, getX, arginfo_CoordSeq_getX, 0)
+-    PHP_ME(CoordSeq, getY, arginfo_CoordSeq_getY, 0)
+-    PHP_ME(CoordSeq, getZ, arginfo_CoordSeq_getZ, 0)
+-    PHP_ME(CoordSeq, getM, arginfo_CoordSeq_getM, 0)
+-    PHP_ME(CoordSeq, setXY, arginfo_CoordSeq_setXY, 0)
+-    PHP_ME(CoordSeq, setXYZ, arginfo_CoordSeq_setXYZ, 0)
+-    PHP_ME(CoordSeq, getXY, arginfo_CoordSeq_getXY, 0)
+-    PHP_ME(CoordSeq, getXYZ, arginfo_CoordSeq_getXYZ, 0)
+-    PHP_ME(CoordSeq, copyFromArrays, arginfo_CoordSeq_copyFromArrays, 0)
+-    PHP_ME(CoordSeq, copyToArrays, arginfo_CoordSeq_copyToArrays, 0)
+-    {NULL, NULL, NULL}
+-};
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-static zend_class_entry *CoordSeq_ce_ptr;
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|a",
++            &params_val) == FAILURE) {
++        RETURN_NULL();
++    }
+ 
+-static zend_object_handlers CoordSeq_object_handlers;
++    if (!params_val || zend_hash_num_elements(HASH_OF(params_val)) == 0) {
++        ret = GEOSMakeValid_r(GEOS_G(handle), this);
++    } else {
++        GEOSMakeValidParams *mvp = GEOSMakeValidParams_create_r(GEOS_G(handle));
++        if (!mvp) RETURN_NULL();
+ 
+-static void
+-CoordSeq_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
+-{
+-#if PHP_VERSION_ID < 70000
+-    Proxy *obj = (Proxy *)object;
++        params = HASH_OF(params_val);
++        zend_hash_internal_pointer_reset(params);
++        while (GEOS_PHP_HASH_GET_CUR_KEY(params, &key, &index)
++               == HASH_KEY_IS_STRING)
++        {
++            if (!strcmp(ZSTR_VAL(key), "method")) {
++                zval tmp;
++                int methodValue = GEOS_MAKE_VALID_LINEWORK;
++                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
++#if PHP_VERSION_ID >= 70000
++                tmp = *data;
+ #else
+-    Proxy *obj = php_geos_fetch_object(object);
++                tmp = **data;
+ #endif
++                zval_copy_ctor(&tmp);
++                convert_to_string(&tmp);
++                if (!strcmp(Z_STRVAL(tmp), "structure")) {
++                    methodValue = GEOS_MAKE_VALID_STRUCTURE;
++                } else if (!strcmp(Z_STRVAL(tmp), "linework")) {
++                    methodValue = GEOS_MAKE_VALID_LINEWORK;
++                } else {
++                    zval_dtor(&tmp);
++                    GEOSMakeValidParams_destroy_r(GEOS_G(handle), mvp);
++                    zend_throw_exception_ex(
++                        zend_exception_get_default(TSRMLS_C), 1 TSRMLS_CC,
++                        "makeValid 'method' must be 'linework' or 'structure'");
++                    RETURN_NULL();
++                }
++                zval_dtor(&tmp);
++                GEOSMakeValidParams_setMethod_r(GEOS_G(handle), mvp,
++                    (enum GEOSMakeValidMethods)methodValue);
++            } else if (!strcmp(ZSTR_VAL(key), "keep_collapsed")) {
++                long bv;
++                GEOS_PHP_HASH_GET_CUR_DATA(params, data);
++                bv = getZvalAsLong(data);
++                GEOSMakeValidParams_setKeepCollapsed_r(GEOS_G(handle), mvp,
++                    bv ? 1 : 0);
++            }
++            zend_hash_move_forward(params);
++        }
+ 
+-    GEOSCoordSequence *seq = (GEOSCoordSequence*)obj->relay;
+-    if (seq) {
+-        GEOSCoordSeq_destroy_r(GEOS_G(handle), seq);
++        ret = GEOSMakeValidWithParams_r(GEOS_G(handle), this, mvp);
++        GEOSMakeValidParams_destroy_r(GEOS_G(handle), mvp);
+     }
+ 
+-#if PHP_VERSION_ID < 70000
+-    zend_hash_destroy(obj->std.properties);
+-    FREE_HASHTABLE(obj->std.properties);
+-
+-    efree(obj);
+-#endif
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
+ }
+ 
+-static zend_object_value
+-CoordSeq_create_obj (zend_class_entry *type TSRMLS_DC)
++/**
++ * GEOSGeometry::concaveHull(float $ratio, bool $allowHoles = false)
++ */
++PHP_METHOD(Geometry, concaveHull)
+ {
+-    return Gen_create_obj(type, CoordSeq_dtor, &CoordSeq_object_handlers);
+-}
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double ratio;
++    zend_bool allowHoles = 0;
+ 
+-/* Helper: bounds-check an index against the coord-seq size. Returns
+- * 0 on success, throws and returns 1 on failure. */
+-static int
+-CoordSeq_checkIndex(GEOSCoordSequence *seq, long idx)
+-{
+-    TSRMLS_FETCH();
+-    unsigned int size = 0;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (idx < 0) {
+-        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+-            1 TSRMLS_CC, "GEOSCoordSeq index %ld is negative", idx);
+-        return 1;
+-    }
+-    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
+-        return 1; /* GEOS will have thrown */
+-    }
+-    if ((unsigned int)idx >= size) {
+-        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+-            1 TSRMLS_CC,
+-            "GEOSCoordSeq index %ld out of range [0..%u)", idx, size);
+-        return 1;
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
++            &ratio, &allowHoles) == FAILURE) {
++        RETURN_NULL();
+     }
+-    return 0;
++
++    ret = GEOSConcaveHull_r(GEOS_G(handle), this, ratio, allowHoles ? 1 : 0);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
+ }
+ 
+-PHP_METHOD(CoordSeq, __construct)
++/**
++ * GEOSGeometry::concaveHullByLength(float $maxLength, bool $allowHoles = false)
++ */
++PHP_METHOD(Geometry, concaveHullByLength)
+ {
+-    GEOSCoordSequence *seq;
+-    zval *object = getThis();
+-    zend_long size;
+-    zend_long dim = 2;
+-    zend_bool hasM = 0;
+-    int hasZ;
+-
+-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l|lb",
+-            &size, &dim, &hasM) == FAILURE) {
+-        RETURN_NULL();
+-    }
+-
+-    if (size < 0) {
+-        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+-            1 TSRMLS_CC, "GEOSCoordSeq size cannot be negative");
+-        RETURN_NULL();
+-    }
+-    if (dim != 2 && dim != 3) {
+-        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+-            1 TSRMLS_CC,
+-            "GEOSCoordSeq dim must be 2 or 3 (got %ld)", (long)dim);
+-        RETURN_NULL();
+-    }
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double maxLength;
++    zend_bool allowHoles = 0;
+ 
+-    hasZ = (dim == 3) ? 1 : 0;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    seq = GEOSCoordSeq_createWithDimensions_r(GEOS_G(handle),
+-            (unsigned int)size, hasZ, hasM ? 1 : 0);
+-    if ( ! seq ) {
+-        php_error_docref(NULL TSRMLS_CC, E_ERROR,
+-                "GEOSCoordSeq_createWithDimensions() failed (didn't initGEOS?)");
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|b",
++            &maxLength, &allowHoles) == FAILURE) {
+         RETURN_NULL();
+     }
+ 
+-    setRelay(object, seq);
++    ret = GEOSConcaveHullByLength_r(GEOS_G(handle), this, maxLength,
++        allowHoles ? 1 : 0);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
+ }
+ 
+-PHP_METHOD(CoordSeq, getSize)
++/**
++ * GEOSGeometry::concaveHullOfPolygons(float $ratio,
++ *   bool $isTight = true, bool $allowHoles = false)
++ */
++PHP_METHOD(Geometry, concaveHullOfPolygons)
+ {
+-    GEOSCoordSequence *seq;
+-    unsigned int size = 0;
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double ratio;
++    zend_bool isTight = 1;
++    zend_bool allowHoles = 0;
+ 
+-    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|bb",
++            &ratio, &isTight, &allowHoles) == FAILURE) {
+         RETURN_NULL();
+     }
+ 
+-    RETURN_LONG((long)size);
++    ret = GEOSConcaveHullOfPolygons_r(GEOS_G(handle), this, ratio,
++        isTight ? 1 : 0, allowHoles ? 1 : 0);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
+ }
+ 
+-PHP_METHOD(CoordSeq, getDimensions)
++/**
++ * GEOSGeometry::polygonHullSimplify(bool $isOuter, float $param,
++ *   ?int $mode = null)
++ */
++PHP_METHOD(Geometry, polygonHullSimplify)
+ {
+-    GEOSCoordSequence *seq;
+-    unsigned int dims = 0;
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    zend_bool isOuter;
++    double param;
++    zval *modeZv = NULL;
+ 
+-    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    if (!GEOSCoordSeq_getDimensions_r(GEOS_G(handle), seq, &dims)) {
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "bd|z!",
++            &isOuter, &param, &modeZv) == FAILURE) {
+         RETURN_NULL();
+     }
+ 
+-    RETURN_LONG((long)dims);
++    if (modeZv && Z_TYPE_P(modeZv) != IS_NULL) {
++        long mode;
++        zval tmp;
++        tmp = *modeZv;
++        zval_copy_ctor(&tmp);
++        convert_to_long(&tmp);
++        mode = Z_LVAL(tmp);
++        zval_dtor(&tmp);
++        ret = GEOSPolygonHullSimplifyMode_r(GEOS_G(handle), this,
++            isOuter ? 1 : 0, (unsigned int)mode, param);
++    } else {
++        ret = GEOSPolygonHullSimplify_r(GEOS_G(handle), this,
++            isOuter ? 1 : 0, param);
++    }
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
+ }
+ 
+-PHP_METHOD(CoordSeq, hasZ)
++/* -- Item 8: Hull / metric extras -------------------- */
++
++PHP_METHOD(Geometry, minimumBoundingCircle)
+ {
+-    GEOSCoordSequence *seq;
+-    char ret;
+-    zend_bool retBool;
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    GEOSGeometry *center = NULL;
++    double radius = 0.0;
+ 
+-    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
+ 
+-    ret = GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq);
+-    retBool = ret ? 1 : 0;
++    /* GEOSMinimumBoundingCircle_r writes to radius and *center. We don't
++     * expose them here (GEOSGeometry::minimumBoundingCircle returns the
++     * circle geometry only); just destroy the center geom afterwards. */
++    ret = GEOSMinimumBoundingCircle_r(GEOS_G(handle), this, &radius, &center);
++    if (center) GEOSGeom_destroy_r(GEOS_G(handle), center);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, minimumRotatedRectangle)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSMinimumRotatedRectangle_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, minimumWidth)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSMinimumWidth_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, minimumClearance)
++{
++    GEOSGeometry *this;
++    double d;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    rc = GEOSMinimumClearance_r(GEOS_G(handle), this, &d);
++    if (rc != 0) RETURN_NULL();
++    RETURN_DOUBLE(d);
++}
++
++PHP_METHOD(Geometry, minimumClearanceLine)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSMinimumClearanceLine_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, maximumInscribedCircle)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double tol;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d", &tol) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSMaximumInscribedCircle_r(GEOS_G(handle), this, tol);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/**
++ * GEOSGeometry::largestEmptyCircle(float $tol, ?GEOSGeometry $boundary = null)
++ *
++ * Order matches the natural required-then-optional pattern.
++ */
++PHP_METHOD(Geometry, largestEmptyCircle)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    GEOSGeometry *boundary = NULL;
++    double tol;
++    zval *zobj = NULL;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d|o!",
++            &tol, &zobj) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    if (zobj) boundary = getRelay(zobj, Geometry_ce_ptr);
++    ret = GEOSLargestEmptyCircle_r(GEOS_G(handle), this, boundary, tol);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/* -- Item 9: Distance / metric extras -------------------- */
++
++PHP_METHOD(Geometry, distanceWithin)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    double maxDist;
++    char ret;
++    zend_bool retBool;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
++            &zobj, &maxDist) == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    ret = GEOSDistanceWithin_r(GEOS_G(handle), this, other, maxDist);
++    if (ret == 2) RETURN_NULL();
++    retBool = ret;
++    RETURN_BOOL(retBool);
++}
++
++PHP_METHOD(Geometry, distanceIndexed)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    double dist;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSDistanceIndexed_r(GEOS_G(handle), this, other, &dist);
++    if (rc != 1) RETURN_NULL();
++    RETURN_DOUBLE(dist);
++}
++
++/**
++ * GEOSGeometry::nearestPoints(GEOSGeometry $other) : GEOSCoordSeq
++ *
++ * GEOSNearestPoints_r returns a NEW coord-seq that the caller owns; we
++ * wrap it directly via setRelay (no clone) per CoordSeq lifecycle rule 1.
++ */
++PHP_METHOD(Geometry, nearestPoints)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    GEOSCoordSequence *cs;
++    zval *zobj;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    cs = GEOSNearestPoints_r(GEOS_G(handle), this, other);
++    if ( ! cs ) RETURN_NULL();
++
++    object_init_ex(return_value, CoordSeq_ce_ptr);
++    setRelay(return_value, cs);
++}
++
++PHP_METHOD(Geometry, frechetDistance)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    double dist;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSFrechetDistance_r(GEOS_G(handle), this, other, &dist);
++    if (rc != 1) RETURN_NULL();
++    RETURN_DOUBLE(dist);
++}
++
++PHP_METHOD(Geometry, frechetDistanceDensify)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    double dist, frac;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
++            &zobj, &frac) == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSFrechetDistanceDensify_r(GEOS_G(handle), this, other, frac, &dist);
++    if (rc != 1) RETURN_NULL();
++    RETURN_DOUBLE(dist);
++}
++
++PHP_METHOD(Geometry, hausdorffDistanceDensify)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    double dist, frac;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "od",
++            &zobj, &frac) == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    rc = GEOSHausdorffDistanceDensify_r(GEOS_G(handle), this, other, frac, &dist);
++    if (rc != 1) RETURN_NULL();
++    RETURN_DOUBLE(dist);
++}
++
++/* -- Item 10: Linear referencing extras -------------------- */
++
++PHP_METHOD(Geometry, lineSubstring)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double startFrac, endFrac;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd",
++            &startFrac, &endFrac) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSLineSubstring_r(GEOS_G(handle), this, startFrac, endFrac);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, lineMergeDirected)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSLineMergeDirected_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/* -- Item 11: Construction / utility extras -------------------- */
++
++PHP_METHOD(Geometry, reverse)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    ret = GEOSReverse_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, densify)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double dist;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "d", &dist) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSDensify_r(GEOS_G(handle), this, dist);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++PHP_METHOD(Geometry, removeRepeatedPoints)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    double tol = 0.0;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|d", &tol) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    ret = GEOSRemoveRepeatedPoints_r(GEOS_G(handle), this, tol);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/**
++ * GEOSGeometry::orientPolygons(bool $exterior_cw = false)
++ *
++ * Mutates a CLONE of the source geometry; returns the (oriented) clone.
++ * GEOSOrientPolygons_r operates in-place, so we clone first so the input
++ * geometry remains immutable from a PHP-API perspective.
++ */
++PHP_METHOD(Geometry, orientPolygons)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *clone;
++    zend_bool exterior_cw = 0;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|b",
++            &exterior_cw) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    clone = GEOSGeom_clone_r(GEOS_G(handle), this);
++    if ( ! clone ) RETURN_NULL();
++
++    rc = GEOSOrientPolygons_r(GEOS_G(handle), clone, exterior_cw ? 1 : 0);
++    if (rc < 0) {
++        GEOSGeom_destroy_r(GEOS_G(handle), clone);
++        RETURN_NULL();
++    }
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, clone);
++}
++
++PHP_METHOD(Geometry, equalsIdentical)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *other;
++    zval *zobj;
++    char ret;
++    zend_bool retBool;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++            == FAILURE) {
++        RETURN_NULL();
++    }
++    other = getRelay(zobj, Geometry_ce_ptr);
++
++    ret = GEOSEqualsIdentical_r(GEOS_G(handle), this, other);
++    if (ret == 2) RETURN_NULL();
++    retBool = ret;
++    RETURN_BOOL(retBool);
++}
++
++PHP_METHOD(Geometry, getXMin)
++{
++    GEOSGeometry *this;
++    double v;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    if (GEOSGeom_getXMin_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
++    RETURN_DOUBLE(v);
++}
++
++PHP_METHOD(Geometry, getXMax)
++{
++    GEOSGeometry *this;
++    double v;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    if (GEOSGeom_getXMax_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
++    RETURN_DOUBLE(v);
++}
++
++PHP_METHOD(Geometry, getYMin)
++{
++    GEOSGeometry *this;
++    double v;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    if (GEOSGeom_getYMin_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
++    RETURN_DOUBLE(v);
++}
++
++PHP_METHOD(Geometry, getYMax)
++{
++    GEOSGeometry *this;
++    double v;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    if (GEOSGeom_getYMax_r(GEOS_G(handle), this, &v) == 0) RETURN_NULL();
++    RETURN_DOUBLE(v);
++}
++
++PHP_METHOD(Geometry, getExtent)
++{
++    GEOSGeometry *this;
++    double xmin, ymin, xmax, ymax;
++    int rc;
++
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    rc = GEOSGeom_getExtent_r(GEOS_G(handle), this,
++        &xmin, &ymin, &xmax, &ymax);
++    if (rc == 0) RETURN_NULL();
++
++    array_init(return_value);
++    add_assoc_double(return_value, "xmin", xmin);
++    add_assoc_double(return_value, "ymin", ymin);
++    add_assoc_double(return_value, "xmax", xmax);
++    add_assoc_double(return_value, "ymax", ymax);
++}
++
++PHP_METHOD(Geometry, buildArea)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *ret;
++    this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++    ret = GEOSBuildArea_r(GEOS_G(handle), this);
++    if ( ! ret ) RETURN_NULL();
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, ret);
++}
++
++/* -- class GEOSCoordSeq -------------------- */
++
++/*
++ * Lifecycle / ownership invariants for GEOSCoordSeq:
++ *
++ *  1. A PHP GEOSCoordSeq object owns its underlying GEOSCoordSequence*. The
++ *     dtor calls GEOSCoordSeq_destroy_r on the relay pointer (if non-NULL).
++ *
++ *  2. GEOS C API functions that build a geometry from a coord-seq
++ *     (GEOSGeom_createPoint_r, _createLineString_r, _createLinearRing_r,
++ *     curved-geometry constructors, etc.) TRANSFER ownership of the coord-seq
++ *     into the new geometry. After such a handoff the PHP coord-seq object's
++ *     relay must be set to NULL via setRelay(zv, NULL) so the dtor does not
++ *     double-free. (Used by item 12/16 factory statics.)
++ *
++ *  3. GEOSGeom_getCoordSeq_r returns a NON-OWNING const pointer to a coord-seq
++ *     internal to a geometry. To wrap that as a PHP GEOSCoordSeq object we
++ *     must FIRST clone via GEOSCoordSeq_clone_r so the PHP object owns its
++ *     own copy. See GEOSGeometry::getCoordSeq() below for an example.
++ */
++
++PHP_METHOD(CoordSeq, __construct);
++PHP_METHOD(CoordSeq, getSize);
++PHP_METHOD(CoordSeq, getDimensions);
++PHP_METHOD(CoordSeq, hasZ);
++PHP_METHOD(CoordSeq, hasM);
++PHP_METHOD(CoordSeq, isCCW);
++PHP_METHOD(CoordSeq, setX);
++PHP_METHOD(CoordSeq, setY);
++PHP_METHOD(CoordSeq, setZ);
++PHP_METHOD(CoordSeq, setM);
++PHP_METHOD(CoordSeq, getX);
++PHP_METHOD(CoordSeq, getY);
++PHP_METHOD(CoordSeq, getZ);
++PHP_METHOD(CoordSeq, getM);
++PHP_METHOD(CoordSeq, setXY);
++PHP_METHOD(CoordSeq, setXYZ);
++PHP_METHOD(CoordSeq, getXY);
++PHP_METHOD(CoordSeq, getXYZ);
++PHP_METHOD(CoordSeq, copyFromArrays);
++PHP_METHOD(CoordSeq, copyToArrays);
++
++static zend_function_entry CoordSeq_methods[] = {
++    PHP_ME(CoordSeq, __construct, arginfo_CoordSeq_construct, 0)
++    PHP_ME(CoordSeq, getSize, arginfo_CoordSeq_getSize, 0)
++    PHP_ME(CoordSeq, getDimensions, arginfo_CoordSeq_getDimensions, 0)
++    PHP_ME(CoordSeq, hasZ, arginfo_CoordSeq_hasZ, 0)
++    PHP_ME(CoordSeq, hasM, arginfo_CoordSeq_hasM, 0)
++    PHP_ME(CoordSeq, isCCW, arginfo_CoordSeq_isCCW, 0)
++    PHP_ME(CoordSeq, setX, arginfo_CoordSeq_setX, 0)
++    PHP_ME(CoordSeq, setY, arginfo_CoordSeq_setY, 0)
++    PHP_ME(CoordSeq, setZ, arginfo_CoordSeq_setZ, 0)
++    PHP_ME(CoordSeq, setM, arginfo_CoordSeq_setM, 0)
++    PHP_ME(CoordSeq, getX, arginfo_CoordSeq_getX, 0)
++    PHP_ME(CoordSeq, getY, arginfo_CoordSeq_getY, 0)
++    PHP_ME(CoordSeq, getZ, arginfo_CoordSeq_getZ, 0)
++    PHP_ME(CoordSeq, getM, arginfo_CoordSeq_getM, 0)
++    PHP_ME(CoordSeq, setXY, arginfo_CoordSeq_setXY, 0)
++    PHP_ME(CoordSeq, setXYZ, arginfo_CoordSeq_setXYZ, 0)
++    PHP_ME(CoordSeq, getXY, arginfo_CoordSeq_getXY, 0)
++    PHP_ME(CoordSeq, getXYZ, arginfo_CoordSeq_getXYZ, 0)
++    PHP_ME(CoordSeq, copyFromArrays, arginfo_CoordSeq_copyFromArrays, 0)
++    PHP_ME(CoordSeq, copyToArrays, arginfo_CoordSeq_copyToArrays, 0)
++    {NULL, NULL, NULL}
++};
++
++/* CoordSeq_ce_ptr is forward-declared near Geometry_ce_ptr. */
++
++static zend_object_handlers CoordSeq_object_handlers;
++
++static void
++CoordSeq_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
++{
++#if PHP_VERSION_ID < 70000
++    Proxy *obj = (Proxy *)object;
++#else
++    Proxy *obj = php_geos_fetch_object(object);
++#endif
++
++    GEOSCoordSequence *seq = (GEOSCoordSequence*)obj->relay;
++    if (seq) {
++        GEOSCoordSeq_destroy_r(GEOS_G(handle), seq);
++    }
++
++#if PHP_VERSION_ID < 70000
++    zend_hash_destroy(obj->std.properties);
++    FREE_HASHTABLE(obj->std.properties);
++
++    efree(obj);
++#endif
++}
++
++static zend_object_value
++CoordSeq_create_obj (zend_class_entry *type TSRMLS_DC)
++{
++    return Gen_create_obj(type, CoordSeq_dtor, &CoordSeq_object_handlers);
++}
++
++/* Helper: bounds-check an index against the coord-seq size. Returns
++ * 0 on success, throws and returns 1 on failure. */
++static int
++CoordSeq_checkIndex(GEOSCoordSequence *seq, long idx)
++{
++    TSRMLS_FETCH();
++    unsigned int size = 0;
++
++    if (idx < 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC, "GEOSCoordSeq index %ld is negative", idx);
++        return 1;
++    }
++    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
++        return 1; /* GEOS will have thrown */
++    }
++    if ((unsigned int)idx >= size) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSCoordSeq index %ld out of range [0..%u)", idx, size);
++        return 1;
++    }
++    return 0;
++}
++
++PHP_METHOD(CoordSeq, __construct)
++{
++    GEOSCoordSequence *seq;
++    zval *object = getThis();
++    zend_long size;
++    zend_long dim = 2;
++    zend_bool hasM = 0;
++    int hasZ;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l|lb",
++            &size, &dim, &hasM) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    if (size < 0) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC, "GEOSCoordSeq size cannot be negative");
++        RETURN_NULL();
++    }
++    if (dim != 2 && dim != 3) {
++        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
++            1 TSRMLS_CC,
++            "GEOSCoordSeq dim must be 2 or 3 (got %ld)", (long)dim);
++        RETURN_NULL();
++    }
++
++    hasZ = (dim == 3) ? 1 : 0;
++
++    seq = GEOSCoordSeq_createWithDimensions_r(GEOS_G(handle),
++            (unsigned int)size, hasZ, hasM ? 1 : 0);
++    if ( ! seq ) {
++        php_error_docref(NULL TSRMLS_CC, E_ERROR,
++                "GEOSCoordSeq_createWithDimensions() failed (didn't initGEOS?)");
++        RETURN_NULL();
++    }
++
++    setRelay(object, seq);
++}
++
++PHP_METHOD(CoordSeq, getSize)
++{
++    GEOSCoordSequence *seq;
++    unsigned int size = 0;
++
++    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++
++    if (!GEOSCoordSeq_getSize_r(GEOS_G(handle), seq, &size)) {
++        RETURN_NULL();
++    }
++
++    RETURN_LONG((long)size);
++}
++
++PHP_METHOD(CoordSeq, getDimensions)
++{
++    GEOSCoordSequence *seq;
++    unsigned int dims = 0;
++
++    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++
++    if (!GEOSCoordSeq_getDimensions_r(GEOS_G(handle), seq, &dims)) {
++        RETURN_NULL();
++    }
++
++    RETURN_LONG((long)dims);
++}
++
++PHP_METHOD(CoordSeq, hasZ)
++{
++    GEOSCoordSequence *seq;
++    char ret;
++    zend_bool retBool;
++
++    seq = (GEOSCoordSequence*)getRelay(getThis(), CoordSeq_ce_ptr);
++
++    ret = GEOSCoordSeq_hasZ_r(GEOS_G(handle), seq);
++    retBool = ret ? 1 : 0;
+     RETURN_BOOL(retBool);
+ }
+ 
+@@ -3197,10 +3993,12 @@ PHP_METHOD(Geometry, getCoordSeq)
+ 
+ PHP_METHOD(WKTReader, __construct);
+ PHP_METHOD(WKTReader, read);
++PHP_METHOD(WKTReader, setFixStructure);
+ 
+ static zend_function_entry WKTReader_methods[] = {
+     PHP_ME(WKTReader, __construct, arginfo_WKTReader_construct, 0)
+     PHP_ME(WKTReader, read, arginfo_WKTReader_read, 0)
++    PHP_ME(WKTReader, setFixStructure, arginfo_WKTReader_setFixStructure, 0)
+     {NULL, NULL, NULL}
+ };
+ 
+@@ -3283,6 +4081,20 @@ PHP_METHOD(WKTReader, read)
+ 
+ }
+ 
++PHP_METHOD(WKTReader, setFixStructure)
++{
++    GEOSWKTReader *reader;
++    zend_bool fix;
++
++    reader = (GEOSWKTReader*)getRelay(getThis(), WKTReader_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "b", &fix) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    GEOSWKTReader_setFixStructure_r(GEOS_G(handle), reader, fix ? 1 : 0);
++}
++
+ /* -- class GEOSWKTWriter -------------------- */
+ 
+ PHP_METHOD(WKTWriter, __construct);
+@@ -3515,6 +4327,8 @@ PHP_METHOD(WKBWriter, setIncludeSRID);
+ PHP_METHOD(WKBWriter, getIncludeSRID);
+ PHP_METHOD(WKBWriter, write);
+ PHP_METHOD(WKBWriter, writeHEX);
++PHP_METHOD(WKBWriter, setFlavor);
++PHP_METHOD(WKBWriter, getFlavor);
+ 
+ static zend_function_entry WKBWriter_methods[] = {
+     PHP_ME(WKBWriter, __construct, arginfo_WKBWriter_construct, 0)
+@@ -3526,6 +4340,8 @@ static zend_function_entry WKBWriter_methods[] = {
+     PHP_ME(WKBWriter, setIncludeSRID, arginfo_WKBWriter_setIncludeSRID, 0)
+     PHP_ME(WKBWriter, write, arginfo_WKBWriter_write, 0)
+     PHP_ME(WKBWriter, writeHEX, arginfo_WKBWriter_writeHEX, 0)
++    PHP_ME(WKBWriter, setFlavor, arginfo_WKBWriter_setFlavor, 0)
++    PHP_ME(WKBWriter, getFlavor, arginfo_WKBWriter_getFlavor, 0)
+     {NULL, NULL, NULL}
+ };
+ 
+@@ -3749,16 +4565,47 @@ PHP_METHOD(WKBWriter, setIncludeSRID)
+     GEOSWKBWriter_setIncludeSRID_r(GEOS_G(handle), writer, inc);
+ }
+ 
++/**
++ * void GEOSWKBWriter::setFlavor(int flavor);
++ */
++PHP_METHOD(WKBWriter, setFlavor)
++{
++    GEOSWKBWriter *writer;
++    zend_long flavor;
++
++    writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &flavor) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    GEOSWKBWriter_setFlavor_r(GEOS_G(handle), writer, (int)flavor);
++}
++
++/**
++ * int GEOSWKBWriter::getFlavor();
++ */
++PHP_METHOD(WKBWriter, getFlavor)
++{
++    GEOSWKBWriter *writer;
++    int ret;
++    writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
++    ret = GEOSWKBWriter_getFlavor_r(GEOS_G(handle), writer);
++    RETURN_LONG(ret);
++}
++
+ /* -- class GEOSWKBReader -------------------- */
+ 
+ PHP_METHOD(WKBReader, __construct);
+ PHP_METHOD(WKBReader, read);
+ PHP_METHOD(WKBReader, readHEX);
++PHP_METHOD(WKBReader, setFixStructure);
+ 
+ static zend_function_entry WKBReader_methods[] = {
+     PHP_ME(WKBReader, __construct, arginfo_WKBReader_construct, 0)
+     PHP_ME(WKBReader, read, arginfo_WKBReader_read, 0)
+     PHP_ME(WKBReader, readHEX, arginfo_WKBReader_readHEX, 0)
++    PHP_ME(WKBReader, setFixStructure, arginfo_WKBReader_setFixStructure, 0)
+     {NULL, NULL, NULL}
+ };
+ 
+@@ -3871,6 +4718,20 @@ PHP_METHOD(WKBReader, readHEX)
+ 
+ }
+ 
++PHP_METHOD(WKBReader, setFixStructure)
++{
++    GEOSWKBReader *reader;
++    zend_bool fix;
++
++    reader = (GEOSWKBReader*)getRelay(getThis(), WKBReader_ce_ptr);
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "b", &fix) == FAILURE) {
++        RETURN_NULL();
++    }
++
++    GEOSWKBReader_setFixStructure_r(GEOS_G(handle), reader, fix ? 1 : 0);
++}
++
+ 
+ /* -- Free functions ------------------------- */
+ 
+@@ -3957,6 +4818,109 @@ PHP_FUNCTION(GEOSPolygonize)
+ 
+ }
+ 
++/**
++ * array GEOSPolygonizeValid(GEOSGeometry $geom)
++ *
++ * Returns an array of valid polygons formed from the linework of the input.
++ */
++PHP_FUNCTION(GEOSPolygonizeValid)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *out;
++    const GEOSGeometry *input[1];
++    zval *zobj;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++        == FAILURE)
++    {
++        RETURN_NULL();
++    }
++    this = getRelay(zobj, Geometry_ce_ptr);
++    input[0] = this;
++
++    out = GEOSPolygonize_valid_r(GEOS_G(handle), input, 1);
++    if ( ! out ) RETURN_NULL();
++
++    array_init(return_value);
++    dumpGeometry(out, return_value);
++    GEOSGeom_destroy_r(GEOS_G(handle), out);
++}
++
++/**
++ * array GEOSPolygonizeCutEdges(GEOSGeometry $geom)
++ *
++ * Returns an array of "cut" edges (edges connected at both ends but not
++ * forming part of any polygon).
++ */
++PHP_FUNCTION(GEOSPolygonizeCutEdges)
++{
++    GEOSGeometry *this;
++    GEOSGeometry *out;
++    const GEOSGeometry *input[1];
++    zval *zobj;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++        == FAILURE)
++    {
++        RETURN_NULL();
++    }
++    this = getRelay(zobj, Geometry_ce_ptr);
++    input[0] = this;
++
++    out = GEOSPolygonizer_getCutEdges_r(GEOS_G(handle), input, 1);
++    if ( ! out ) RETURN_NULL();
++
++    array_init(return_value);
++    dumpGeometry(out, return_value);
++    GEOSGeom_destroy_r(GEOS_G(handle), out);
++}
++
++/**
++ * GEOSGeometry GEOSBuildArea(GEOSGeometry $geom)
++ */
++PHP_FUNCTION(GEOSBuildArea)
++{
++    GEOSGeometry *geom_in;
++    GEOSGeometry *geom_out;
++    zval *zobj;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++        == FAILURE)
++    {
++        RETURN_NULL();
++    }
++    geom_in = getRelay(zobj, Geometry_ce_ptr);
++
++    geom_out = GEOSBuildArea_r(GEOS_G(handle), geom_in);
++    if ( ! geom_out ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, geom_out);
++}
++
++/**
++ * GEOSGeometry GEOSDisjointSubsetUnion(GEOSGeometry $geom)
++ */
++PHP_FUNCTION(GEOSDisjointSubsetUnion)
++{
++    GEOSGeometry *geom_in;
++    GEOSGeometry *geom_out;
++    zval *zobj;
++
++    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &zobj)
++        == FAILURE)
++    {
++        RETURN_NULL();
++    }
++    geom_in = getRelay(zobj, Geometry_ce_ptr);
++
++    geom_out = GEOSDisjointSubsetUnion_r(GEOS_G(handle), geom_in);
++    if ( ! geom_out ) RETURN_NULL();
++
++    object_init_ex(return_value, Geometry_ce_ptr);
++    setRelay(return_value, geom_out);
++}
++
+ /**
+  * array GEOSLineMerge(GEOSGeometry $geom)
+  */
+@@ -4247,6 +5211,25 @@ PHP_MINIT_FUNCTION(geos)
+         CONST_CS|CONST_PERSISTENT);
+ #   endif
+ 
++    /* Item 3: MakeValid methods */
++    REGISTER_LONG_CONSTANT("GEOS_MAKE_VALID_LINEWORK", GEOS_MAKE_VALID_LINEWORK,
++        CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_MAKE_VALID_STRUCTURE", GEOS_MAKE_VALID_STRUCTURE,
++        CONST_CS|CONST_PERSISTENT);
++
++    /* Item 4: PolygonHullSimplify modes — names per implementation plan,
++     * values from GEOSPolygonHullParameterModes in geos_c.h. */
++    REGISTER_LONG_CONSTANT("GEOS_HULL_PARAM_VERTEX_NUM_FRACTION",
++        GEOSHULL_PARAM_VERTEX_RATIO, CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOS_HULL_PARAM_AREA_DELTA_RATIO",
++        GEOSHULL_PARAM_AREA_RATIO, CONST_CS|CONST_PERSISTENT);
++
++    /* Item 7: WKB flavors */
++    REGISTER_LONG_CONSTANT("GEOSWKB_EXTENDED", GEOS_WKB_EXTENDED,
++        CONST_CS|CONST_PERSISTENT);
++    REGISTER_LONG_CONSTANT("GEOSWKB_ISO", GEOS_WKB_ISO,
++        CONST_CS|CONST_PERSISTENT);
++
+     REGISTER_LONG_CONSTANT("GEOSRELATE_BNR_MOD2", GEOSRELATE_BNR_MOD2,
+         CONST_CS|CONST_PERSISTENT);
+     REGISTER_LONG_CONSTANT("GEOSRELATE_BNR_OGC", GEOSRELATE_BNR_OGC,
+diff --git a/tests/010_MakeValid.phpt b/tests/010_MakeValid.phpt
+new file mode 100644
+index 0000000..a75e559
+--- /dev/null
++++ b/tests/010_MakeValid.phpt
+@@ -0,0 +1,97 @@
++--TEST--
++GEOSGeometry::makeValid + GEOS_MAKE_VALID_* constants
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class MakeValidTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++    private function writer() {
++        $w = new GEOSWKTWriter();
++        if (method_exists($w, 'setTrim')) $w->setTrim(true);
++        return $w;
++    }
++
++    public function testConstantsRegistered()
++    {
++        $this->assertTrue(defined('GEOS_MAKE_VALID_LINEWORK'));
++        $this->assertTrue(defined('GEOS_MAKE_VALID_STRUCTURE'));
++        $this->assertEquals(0, GEOS_MAKE_VALID_LINEWORK);
++        $this->assertEquals(1, GEOS_MAKE_VALID_STRUCTURE);
++    }
++
++    public function testMakeValidNoArgs()
++    {
++        /* Bowtie self-intersecting polygon */
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        $v = $g->makeValid();
++        $this->assertNotNull($v);
++        /* Result is valid */
++        $this->assertEquals(0, $v->checkValidity()['valid'] ? 0 : 1);
++    }
++
++    public function testMakeValidEmptyParams()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        $v = $g->makeValid(array());
++        $this->assertNotNull($v);
++    }
++
++    public function testMakeValidLineworkMethod()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        $v = $g->makeValid(array('method' => 'linework'));
++        $this->assertNotNull($v);
++    }
++
++    public function testMakeValidStructureMethod()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        $v = $g->makeValid(array('method' => 'structure',
++                                  'keep_collapsed' => true));
++        $this->assertNotNull($v);
++    }
++
++    public function testMakeValidKeepCollapsedFalse()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        $v = $g->makeValid(array('method' => 'structure',
++                                  'keep_collapsed' => false));
++        $this->assertNotNull($v);
++    }
++
++    public function testMakeValidBadMethodThrows()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 1, 0 1, 1 0, 0 0))');
++        try {
++            $g->makeValid(array('method' => 'frobnicate'));
++            $this->assertTrue(false);
++        } catch (Exception $e) {
++            $this->assertContains('linework', $e->getMessage());
++        }
++    }
++
++    public function testMakeValidOnAlreadyValid()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))');
++        $v = $g->makeValid();
++        $this->assertNotNull($v);
++    }
++}
++
++MakeValidTest::run();
++
++?>
++--EXPECT--
++MakeValidTest->testConstantsRegistered	OK
++MakeValidTest->testMakeValidNoArgs	OK
++MakeValidTest->testMakeValidEmptyParams	OK
++MakeValidTest->testMakeValidLineworkMethod	OK
++MakeValidTest->testMakeValidStructureMethod	OK
++MakeValidTest->testMakeValidKeepCollapsedFalse	OK
++MakeValidTest->testMakeValidBadMethodThrows	OK
++MakeValidTest->testMakeValidOnAlreadyValid	OK
+diff --git a/tests/011_ConcaveHull.phpt b/tests/011_ConcaveHull.phpt
+new file mode 100644
+index 0000000..e023855
+--- /dev/null
++++ b/tests/011_ConcaveHull.phpt
+@@ -0,0 +1,120 @@
++--TEST--
++GEOSGeometry concave hull family
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class ConcaveHullTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    public function testConstantsRegistered()
++    {
++        $this->assertTrue(defined('GEOS_HULL_PARAM_VERTEX_NUM_FRACTION'));
++        $this->assertTrue(defined('GEOS_HULL_PARAM_AREA_DELTA_RATIO'));
++    }
++
++    public function testConcaveHullMultipoint()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOINT(0 0, 1 0, 2 0, 0 1, 1 1, 2 1, 0 2, 1 2, 2 2)');
++        $h = $g->concaveHull(0.5);
++        $this->assertNotNull($h);
++        $this->assertTrue($h->area() > 0);
++    }
++
++    public function testConcaveHullAllowHoles()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOINT(0 0, 1 0, 2 0, 0 1, 1 1, 2 1, 0 2, 1 2, 2 2)');
++        $h = $g->concaveHull(0.5, true);
++        $this->assertNotNull($h);
++    }
++
++    public function testConcaveHullByLength()
++    {
++        $g = $this->reader()->read('MULTIPOINT(0 0, 10 0, 5 8, 5 4)');
++        $h = $g->concaveHullByLength(20.0);
++        $this->assertNotNull($h);
++    }
++
++    public function testConcaveHullByLengthAllowHoles()
++    {
++        $g = $this->reader()->read('MULTIPOINT(0 0, 10 0, 5 8, 5 4)');
++        $h = $g->concaveHullByLength(20.0, true);
++        $this->assertNotNull($h);
++    }
++
++    public function testConcaveHullOfPolygons()
++    {
++        /* Two adjacent unit squares — concave hull of polygons should
++         * yield a sensible polygon. */
++        $g = $this->reader()->read(
++            'MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)),'.
++            '((2 0, 3 0, 3 1, 2 1, 2 0)))');
++        $h = $g->concaveHullOfPolygons(0.7);
++        $this->assertNotNull($h);
++    }
++
++    public function testConcaveHullOfPolygonsLoose()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)),'.
++            '((2 0, 3 0, 3 1, 2 1, 2 0)))');
++        $h = $g->concaveHullOfPolygons(0.7, false, true);
++        $this->assertNotNull($h);
++    }
++
++    public function testPolygonHullSimplifyDefaultMode()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 4 0, 4.1 1, 4 2, 4 4, 0 4, 0 0))');
++        $h = $g->polygonHullSimplify(true, 0.5);
++        $this->assertNotNull($h);
++    }
++
++    public function testPolygonHullSimplifyVertexFraction()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 4 0, 4.1 1, 4 2, 4 4, 0 4, 0 0))');
++        $h = $g->polygonHullSimplify(true, 0.5,
++            GEOS_HULL_PARAM_VERTEX_NUM_FRACTION);
++        $this->assertNotNull($h);
++    }
++
++    public function testPolygonHullSimplifyAreaDelta()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 4 0, 4.1 1, 4 2, 4 4, 0 4, 0 0))');
++        $h = $g->polygonHullSimplify(true, 0.1,
++            GEOS_HULL_PARAM_AREA_DELTA_RATIO);
++        $this->assertNotNull($h);
++    }
++
++    public function testPolygonHullSimplifyInner()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 4 0, 4.1 1, 4 2, 4 4, 0 4, 0 0))');
++        $h = $g->polygonHullSimplify(false, 0.5);
++        $this->assertNotNull($h);
++    }
++}
++
++ConcaveHullTest::run();
++
++?>
++--EXPECT--
++ConcaveHullTest->testConstantsRegistered	OK
++ConcaveHullTest->testConcaveHullMultipoint	OK
++ConcaveHullTest->testConcaveHullAllowHoles	OK
++ConcaveHullTest->testConcaveHullByLength	OK
++ConcaveHullTest->testConcaveHullByLengthAllowHoles	OK
++ConcaveHullTest->testConcaveHullOfPolygons	OK
++ConcaveHullTest->testConcaveHullOfPolygonsLoose	OK
++ConcaveHullTest->testPolygonHullSimplifyDefaultMode	OK
++ConcaveHullTest->testPolygonHullSimplifyVertexFraction	OK
++ConcaveHullTest->testPolygonHullSimplifyAreaDelta	OK
++ConcaveHullTest->testPolygonHullSimplifyInner	OK
+diff --git a/tests/012_PrecOverlays.phpt b/tests/012_PrecOverlays.phpt
+new file mode 100644
+index 0000000..ad84d81
+--- /dev/null
++++ b/tests/012_PrecOverlays.phpt
+@@ -0,0 +1,123 @@
++--TEST--
++Precision-grid overlays — intersection/difference/symDifference/union with optional gridSize
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class PrecOverlaysTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    public function testIntersectionNoGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->intersection($b);
++        $this->assertNotNull($r);
++        $this->assertTrue($r->area() > 0);
++    }
++
++    public function testIntersectionWithGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->intersection($b, 1.0);
++        $this->assertNotNull($r);
++    }
++
++    public function testDifferenceNoGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->difference($b);
++        $this->assertNotNull($r);
++    }
++
++    public function testDifferenceWithGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->difference($b, 1.0);
++        $this->assertNotNull($r);
++    }
++
++    public function testSymDifferenceNoGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->symDifference($b);
++        $this->assertNotNull($r);
++    }
++
++    public function testSymDifferenceWithGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->symDifference($b, 1.0);
++        $this->assertNotNull($r);
++    }
++
++    public function testUnaryUnionNoArgs()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOLYGON(((0 0, 2 0, 2 2, 0 2, 0 0)),'.
++            '((1 1, 3 1, 3 3, 1 3, 1 1)))');
++        $r = $g->union();
++        $this->assertNotNull($r);
++    }
++
++    public function testUnaryUnionWithGrid()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOLYGON(((0 0, 2 0, 2 2, 0 2, 0 0)),'.
++            '((1 1, 3 1, 3 3, 1 3, 1 1)))');
++        $r = $g->union(null, 1.0);
++        $this->assertNotNull($r);
++    }
++
++    public function testBinaryUnionNoGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->union($b);
++        $this->assertNotNull($r);
++    }
++
++    public function testBinaryUnionWithGrid()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        $b = $this->reader()->read('POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))');
++        $r = $a->union($b, 1.0);
++        $this->assertNotNull($r);
++    }
++
++    public function testIntersectionRequiresOther()
++    {
++        $a = $this->reader()->read('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))');
++        try {
++            $a->intersection();
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++}
++
++PrecOverlaysTest::run();
++
++?>
++--EXPECT--
++PrecOverlaysTest->testIntersectionNoGrid	OK
++PrecOverlaysTest->testIntersectionWithGrid	OK
++PrecOverlaysTest->testDifferenceNoGrid	OK
++PrecOverlaysTest->testDifferenceWithGrid	OK
++PrecOverlaysTest->testSymDifferenceNoGrid	OK
++PrecOverlaysTest->testSymDifferenceWithGrid	OK
++PrecOverlaysTest->testUnaryUnionNoArgs	OK
++PrecOverlaysTest->testUnaryUnionWithGrid	OK
++PrecOverlaysTest->testBinaryUnionNoGrid	OK
++PrecOverlaysTest->testBinaryUnionWithGrid	OK
++PrecOverlaysTest->testIntersectionRequiresOther	OK
+diff --git a/tests/014_FixStructure.phpt b/tests/014_FixStructure.phpt
+new file mode 100644
+index 0000000..68ca3ed
+--- /dev/null
++++ b/tests/014_FixStructure.phpt
+@@ -0,0 +1,123 @@
++--TEST--
++WKB flavor + reader fix-structure
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class FixStructureTest extends GEOSTest
++{
++    public function testWKBConstantsRegistered()
++    {
++        $this->assertTrue(defined('GEOSWKB_EXTENDED'));
++        $this->assertTrue(defined('GEOSWKB_ISO'));
++        $this->assertEquals(1, GEOSWKB_EXTENDED);
++        $this->assertEquals(2, GEOSWKB_ISO);
++    }
++
++    public function testWKBWriterDefaultFlavorIsExtended()
++    {
++        $w = new GEOSWKBWriter();
++        $this->assertEquals(GEOSWKB_EXTENDED, $w->getFlavor());
++    }
++
++    public function testWKBWriterSetFlavorIso()
++    {
++        $w = new GEOSWKBWriter();
++        $w->setFlavor(GEOSWKB_ISO);
++        $this->assertEquals(GEOSWKB_ISO, $w->getFlavor());
++    }
++
++    public function testWKBWriterSetFlavorExtended()
++    {
++        $w = new GEOSWKBWriter();
++        $w->setFlavor(GEOSWKB_ISO);
++        $w->setFlavor(GEOSWKB_EXTENDED);
++        $this->assertEquals(GEOSWKB_EXTENDED, $w->getFlavor());
++    }
++
++    public function testFlavorByteLengthsForXYZPoint()
++    {
++        /* Z-aware POINT.  EXTENDED and ISO flavors encode XYZ differently
++         * but produce identical byte lengths for the same geometry; we
++         * exercise both paths and verify both produce non-empty output that
++         * round-trips to the same WKT. */
++        $rdr = new GEOSWKTReader();
++        $g = $rdr->read('POINT Z (1 2 3)');
++
++        $we = new GEOSWKBWriter();
++        $we->setOutputDimension(3);
++        $we->setFlavor(GEOSWKB_EXTENDED);
++        $bExt = $we->write($g);
++
++        $wi = new GEOSWKBWriter();
++        $wi->setOutputDimension(3);
++        $wi->setFlavor(GEOSWKB_ISO);
++        $bIso = $wi->write($g);
++
++        $this->assertTrue(strlen($bExt) > 0);
++        $this->assertTrue(strlen($bIso) > 0);
++
++        /* Both can be read back. */
++        $rdrW = new GEOSWKBReader();
++        $g2 = $rdrW->read($bExt);
++        $g3 = $rdrW->read($bIso);
++        $this->assertNotNull($g2);
++        $this->assertNotNull($g3);
++        $this->assertTrue($g2->equals($g3));
++    }
++
++    public function testWKTReaderSetFixStructureUnclosedRing()
++    {
++        /* Without setFixStructure, GEOS 3.14 still accepts unclosed rings
++         * and silently closes them in newer versions.  We just exercise
++         * the setter and confirm the reader still produces a valid
++         * polygon afterwards. */
++        $rdr = new GEOSWKTReader();
++        $rdr->setFixStructure(true);
++        /* unclosed ring */
++        $g = $rdr->read('POLYGON((0 0, 1 0, 1 1, 0 1))');
++        $this->assertNotNull($g);
++        $this->assertTrue($g->area() > 0);
++    }
++
++    public function testWKTReaderSetFixStructureFalse()
++    {
++        $rdr = new GEOSWKTReader();
++        $rdr->setFixStructure(false);
++        $g = $rdr->read('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))');
++        $this->assertNotNull($g);
++    }
++
++    public function testWKBReaderSetFixStructure()
++    {
++        /* Just exercise the setter — verifying it parses something
++         * round-trip without errors is sufficient. */
++        $reader = new GEOSWKBReader();
++        $reader->setFixStructure(false);
++        $reader->setFixStructure(true);
++
++        /* And verify normal reading still works after toggling. */
++        $rdr = new GEOSWKTReader();
++        $g = $rdr->read('POINT(1 2)');
++        $w = new GEOSWKBWriter();
++        $bytes = $w->write($g);
++        $g2 = $reader->read($bytes);
++        $this->assertNotNull($g2);
++    }
++}
++
++FixStructureTest::run();
++
++?>
++--EXPECT--
++FixStructureTest->testWKBConstantsRegistered	OK
++FixStructureTest->testWKBWriterDefaultFlavorIsExtended	OK
++FixStructureTest->testWKBWriterSetFlavorIso	OK
++FixStructureTest->testWKBWriterSetFlavorExtended	OK
++FixStructureTest->testFlavorByteLengthsForXYZPoint	OK
++FixStructureTest->testWKTReaderSetFixStructureUnclosedRing	OK
++FixStructureTest->testWKTReaderSetFixStructureFalse	OK
++FixStructureTest->testWKBReaderSetFixStructure	OK
+diff --git a/tests/015_HullExtras.phpt b/tests/015_HullExtras.phpt
+new file mode 100644
+index 0000000..82aefe6
+--- /dev/null
++++ b/tests/015_HullExtras.phpt
+@@ -0,0 +1,110 @@
++--TEST--
++Hull / metric extras — bounding circle, rotated rectangle, inscribed circle, etc.
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class HullExtrasTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    public function testMinimumBoundingCircle()
++    {
++        /* 1x1 square — bounding circle radius is sqrt(2)/2 ≈ 0.707, so
++         * area ≈ pi/2 ≈ 1.5708. */
++        $g = $this->reader()->read('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))');
++        $c = $g->minimumBoundingCircle();
++        $this->assertNotNull($c);
++        $a = $c->area();
++        $this->assertTrue($a > 1.5 && $a < 1.6);
++    }
++
++    public function testMinimumRotatedRectangleTilted()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 4 1, 5 5, 1 4, 0 0))');
++        $r = $g->minimumRotatedRectangle();
++        $this->assertNotNull($r);
++        $this->assertTrue($r->area() > 0);
++    }
++
++    public function testMinimumWidth()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 4 0, 4 1, 0 1, 0 0))');
++        $w = $g->minimumWidth();
++        $this->assertNotNull($w);
++        /* Should be a LINESTRING */
++        $this->assertEquals('LineString', $w->typeName());
++    }
++
++    public function testMinimumClearance()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
++        $c = $g->minimumClearance();
++        $this->assertTrue(is_float($c));
++        $this->assertTrue($c > 0);
++    }
++
++    public function testMinimumClearanceLine()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
++        $l = $g->minimumClearanceLine();
++        $this->assertNotNull($l);
++    }
++
++    public function testMaximumInscribedCircle()
++    {
++        /* 10x10 square — max inscribed circle has radius 5. */
++        $g = $this->reader()->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
++        $c = $g->maximumInscribedCircle(0.5);
++        $this->assertNotNull($c);
++        /* radius == length of returned LINESTRING */
++        $this->assertTrue($c->length() > 4 && $c->length() < 6);
++    }
++
++    public function testMaximumInscribedCircleRequiresArg()
++    {
++        $g = $this->reader()->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
++        try {
++            $g->maximumInscribedCircle();
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++
++    public function testLargestEmptyCircleNoBoundary()
++    {
++        /* Two distant points — the largest empty circle can sit between
++         * them.  GEOS clips to the envelope by default. */
++        $g = $this->reader()->read('MULTIPOINT(0 0, 10 0)');
++        $c = $g->largestEmptyCircle(0.5);
++        $this->assertNotNull($c);
++    }
++
++    public function testLargestEmptyCircleWithBoundary()
++    {
++        $g = $this->reader()->read('MULTIPOINT(0 0, 10 0)');
++        $bnd = $this->reader()->read(
++            'POLYGON((-1 -5, 11 -5, 11 5, -1 5, -1 -5))');
++        $c = $g->largestEmptyCircle(0.5, $bnd);
++        $this->assertNotNull($c);
++    }
++}
++
++HullExtrasTest::run();
++
++?>
++--EXPECT--
++HullExtrasTest->testMinimumBoundingCircle	OK
++HullExtrasTest->testMinimumRotatedRectangleTilted	OK
++HullExtrasTest->testMinimumWidth	OK
++HullExtrasTest->testMinimumClearance	OK
++HullExtrasTest->testMinimumClearanceLine	OK
++HullExtrasTest->testMaximumInscribedCircle	OK
++HullExtrasTest->testMaximumInscribedCircleRequiresArg	OK
++HullExtrasTest->testLargestEmptyCircleNoBoundary	OK
++HullExtrasTest->testLargestEmptyCircleWithBoundary	OK
+diff --git a/tests/016_DistanceExtras.phpt b/tests/016_DistanceExtras.phpt
+new file mode 100644
+index 0000000..f9aa109
+--- /dev/null
++++ b/tests/016_DistanceExtras.phpt
+@@ -0,0 +1,126 @@
++--TEST--
++Distance / metric extras — distanceWithin, nearestPoints, frechetDistance, etc.
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class DistanceExtrasTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++
++    public function testDistanceWithinTrue()
++    {
++        $a = $this->reader()->read('POINT(0 0)');
++        $b = $this->reader()->read('POINT(3 4)');
++        $this->assertTrue($a->distanceWithin($b, 6.0));
++    }
++
++    public function testDistanceWithinFalse()
++    {
++        $a = $this->reader()->read('POINT(0 0)');
++        $b = $this->reader()->read('POINT(3 4)');
++        $this->assertFalse($a->distanceWithin($b, 4.0));
++    }
++
++    public function testDistanceWithinRequiresMaxDist()
++    {
++        $a = $this->reader()->read('POINT(0 0)');
++        $b = $this->reader()->read('POINT(3 4)');
++        try {
++            $a->distanceWithin($b);
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++
++    public function testDistanceIndexed()
++    {
++        $a = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $b = $this->reader()->read('LINESTRING(5 3, 5 7)');
++        $d = $a->distanceIndexed($b);
++        $this->assertEquals(3.0, $d);
++    }
++
++    public function testNearestPointsReturnsCoordSeq()
++    {
++        $a = $this->reader()->read('POINT(0 0)');
++        $b = $this->reader()->read('POINT(3 4)');
++        $cs = $a->nearestPoints($b);
++        $this->assertNotNull($cs);
++        $this->assertTrue($cs instanceof GEOSCoordSeq);
++        $this->assertEquals(2, $cs->getSize());
++        /* First point on $a, second on $b */
++        $this->assertEquals(0.0, $cs->getX(0));
++        $this->assertEquals(0.0, $cs->getY(0));
++        $this->assertEquals(3.0, $cs->getX(1));
++        $this->assertEquals(4.0, $cs->getY(1));
++    }
++
++    public function testNearestPointsRequiresOther()
++    {
++        $a = $this->reader()->read('POINT(0 0)');
++        try {
++            $a->nearestPoints();
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++
++    public function testFrechetDistance()
++    {
++        $a = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $b = $this->reader()->read('LINESTRING(0 1, 10 1)');
++        $d = $a->frechetDistance($b);
++        $this->assertTrue(is_float($d));
++        $this->assertTrue($d >= 1.0);
++    }
++
++    public function testFrechetDistanceDensify()
++    {
++        $a = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $b = $this->reader()->read('LINESTRING(0 1, 10 1)');
++        $d = $a->frechetDistanceDensify($b, 0.1);
++        $this->assertTrue(is_float($d));
++        $this->assertTrue($d > 0);
++    }
++
++    public function testHausdorffDistanceDensify()
++    {
++        $a = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $b = $this->reader()->read('LINESTRING(0 1, 10 1)');
++        $d = $a->hausdorffDistanceDensify($b, 0.1);
++        $this->assertTrue(is_float($d));
++        $this->assertTrue($d > 0);
++    }
++
++    public function testFrechetDistanceRequiresOther()
++    {
++        $a = $this->reader()->read('LINESTRING(0 0, 1 0)');
++        try {
++            $a->frechetDistance();
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++}
++
++DistanceExtrasTest::run();
++
++?>
++--EXPECT--
++DistanceExtrasTest->testDistanceWithinTrue	OK
++DistanceExtrasTest->testDistanceWithinFalse	OK
++DistanceExtrasTest->testDistanceWithinRequiresMaxDist	OK
++DistanceExtrasTest->testDistanceIndexed	OK
++DistanceExtrasTest->testNearestPointsReturnsCoordSeq	OK
++DistanceExtrasTest->testNearestPointsRequiresOther	OK
++DistanceExtrasTest->testFrechetDistance	OK
++DistanceExtrasTest->testFrechetDistanceDensify	OK
++DistanceExtrasTest->testHausdorffDistanceDensify	OK
++DistanceExtrasTest->testFrechetDistanceRequiresOther	OK
+diff --git a/tests/017_LinearReferencing.phpt b/tests/017_LinearReferencing.phpt
+new file mode 100644
+index 0000000..c4f7823
+--- /dev/null
++++ b/tests/017_LinearReferencing.phpt
+@@ -0,0 +1,75 @@
++--TEST--
++Linear referencing extras — lineSubstring + lineMergeDirected
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class LinearReferencingTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++    private function writer() {
++        $w = new GEOSWKTWriter();
++        if (method_exists($w, 'setTrim')) $w->setTrim(true);
++        return $w;
++    }
++
++    public function testLineSubstringMidHalf()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $sub = $g->lineSubstring(0.25, 0.75);
++        $this->assertNotNull($sub);
++        /* substring of half the length of a length-10 line is length 5 */
++        $this->assertEquals(5.0, $sub->length());
++    }
++
++    public function testLineSubstringFullRange()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $sub = $g->lineSubstring(0.0, 1.0);
++        $this->assertEquals(10.0, $sub->length());
++    }
++
++    public function testLineSubstringRequiresArgs()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        try {
++            $g->lineSubstring(0.0);
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++
++    public function testLineMergeDirected()
++    {
++        /* Two segments in a consistent direction should merge. */
++        $g = $this->reader()->read(
++            'MULTILINESTRING((0 0, 5 0), (5 0, 10 0))');
++        $merged = $g->lineMergeDirected();
++        $this->assertNotNull($merged);
++        $this->assertEquals('LineString', $merged->typeName());
++    }
++
++    public function testLineMergeDirectedNoMerge()
++    {
++        /* Two segments going AWAY from a common point — directed merge
++         * should NOT collapse them. */
++        $g = $this->reader()->read(
++            'MULTILINESTRING((5 0, 0 0), (5 0, 10 0))');
++        $merged = $g->lineMergeDirected();
++        $this->assertNotNull($merged);
++    }
++}
++
++LinearReferencingTest::run();
++
++?>
++--EXPECT--
++LinearReferencingTest->testLineSubstringMidHalf	OK
++LinearReferencingTest->testLineSubstringFullRange	OK
++LinearReferencingTest->testLineSubstringRequiresArgs	OK
++LinearReferencingTest->testLineMergeDirected	OK
++LinearReferencingTest->testLineMergeDirectedNoMerge	OK
+diff --git a/tests/018_ConstructionExtras.phpt b/tests/018_ConstructionExtras.phpt
+new file mode 100644
+index 0000000..557d45b
+--- /dev/null
++++ b/tests/018_ConstructionExtras.phpt
+@@ -0,0 +1,189 @@
++--TEST--
++Construction / utility extras + standalone polygonize/buildArea/disjointSubsetUnion
++--SKIPIF--
++<?php if (!extension_loaded('geos')) { print "geos extension not loaded\n"; exit(1); } ?>
++--FILE--
++<?php
++
++require './tests/TestHelper.php';
++
++class ConstructionExtrasTest extends GEOSTest
++{
++    private function reader() { return new GEOSWKTReader(); }
++    private function writer() {
++        $w = new GEOSWKTWriter();
++        if (method_exists($w, 'setTrim')) $w->setTrim(true);
++        return $w;
++    }
++
++    public function testReverseLineString()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 1 1, 2 2)');
++        $r = $g->reverse();
++        $this->assertNotNull($r);
++        /* First point of reversed line equals last point of original. */
++        $this->assertEquals(2.0, $r->getCoordSeq()->getX(0));
++        $this->assertEquals(2.0, $r->getCoordSeq()->getY(0));
++    }
++
++    public function testDensifySpacing()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        $d = $g->densify(2.0);
++        /* Original had 2 vertices; densified at 2.0 over length 10 has at
++         * least 6 vertices. */
++        $this->assertNotNull($d);
++        $this->assertTrue($d->numCoordinates() >= 6);
++    }
++
++    public function testDensifyRequiresArg()
++    {
++        $g = $this->reader()->read('LINESTRING(0 0, 10 0)');
++        try {
++            $g->densify();
++            $this->assertTrue(false);
++        } catch (Throwable $e) {
++            $this->assertNotNull($e);
++        }
++    }
++
++    public function testRemoveRepeatedPoints()
++    {
++        $g = $this->reader()->read(
++            'LINESTRING(0 0, 0 0, 1 1, 1 1, 2 2)');
++        $r = $g->removeRepeatedPoints();
++        $this->assertEquals(3, $r->numCoordinates());
++    }
++
++    public function testRemoveRepeatedPointsWithTolerance()
++    {
++        $g = $this->reader()->read(
++            'LINESTRING(0 0, 0.001 0.001, 1 1, 1.0001 1.0001, 2 2)');
++        $r = $g->removeRepeatedPoints(0.01);
++        $this->assertTrue($r->numCoordinates() < 5);
++    }
++
++    public function testOrientPolygonsCCW()
++    {
++        /* Default exterior_cw=false => exterior CCW. */
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 0 10, 10 10, 10 0, 0 0))'); // CW
++        $r = $g->orientPolygons();
++        $this->assertNotNull($r);
++        /* Original unchanged */
++        $cs = $g->exteriorRing()->getCoordSeq();
++        $this->assertFalse($cs->isCCW());
++    }
++
++    public function testOrientPolygonsCW()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'); // CCW
++        $r = $g->orientPolygons(true);
++        $cs = $r->exteriorRing()->getCoordSeq();
++        $this->assertFalse($cs->isCCW());
++    }
++
++    public function testEqualsIdenticalPositive()
++    {
++        $a = $this->reader()->read('POINT(1 2)');
++        $b = $this->reader()->read('POINT(1 2)');
++        $this->assertTrue($a->equalsIdentical($b));
++    }
++
++    public function testEqualsIdenticalNegative()
++    {
++        $a = $this->reader()->read('POINT(1 2)');
++        $b = $this->reader()->read('POINT(1 3)');
++        $this->assertFalse($a->equalsIdentical($b));
++    }
++
++    public function testGetXMinMaxYMinMax()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((1 2, 5 2, 5 8, 1 8, 1 2))');
++        $this->assertEquals(1.0, $g->getXMin());
++        $this->assertEquals(5.0, $g->getXMax());
++        $this->assertEquals(2.0, $g->getYMin());
++        $this->assertEquals(8.0, $g->getYMax());
++    }
++
++    public function testGetExtent()
++    {
++        $g = $this->reader()->read(
++            'POLYGON((1 2, 5 2, 5 8, 1 8, 1 2))');
++        $e = $g->getExtent();
++        $this->assertTrue(is_array($e));
++        $this->assertEquals(1.0, $e['xmin']);
++        $this->assertEquals(2.0, $e['ymin']);
++        $this->assertEquals(5.0, $e['xmax']);
++        $this->assertEquals(8.0, $e['ymax']);
++    }
++
++    public function testBuildAreaMethod()
++    {
++        $g = $this->reader()->read(
++            'GEOMETRYCOLLECTION('.
++            'LINESTRING(0 0, 10 0, 10 10, 0 10, 0 0))');
++        $a = $g->buildArea();
++        $this->assertNotNull($a);
++        $this->assertTrue($a->area() > 0);
++    }
++
++    public function testStandaloneBuildArea()
++    {
++        $g = $this->reader()->read(
++            'GEOMETRYCOLLECTION('.
++            'LINESTRING(0 0, 10 0, 10 10, 0 10, 0 0))');
++        $a = GEOSBuildArea($g);
++        $this->assertNotNull($a);
++        $this->assertTrue($a->area() > 0);
++    }
++
++    public function testStandalonePolygonizeValid()
++    {
++        $g = $this->reader()->read(
++            'MULTILINESTRING((0 0, 1 0, 1 1, 0 1, 0 0))');
++        $arr = GEOSPolygonizeValid($g);
++        $this->assertTrue(is_array($arr));
++    }
++
++    public function testStandalonePolygonizeCutEdges()
++    {
++        $g = $this->reader()->read(
++            'MULTILINESTRING((0 0, 1 0, 1 1, 0 1, 0 0),'.
++            '(2 2, 3 3))');
++        $arr = GEOSPolygonizeCutEdges($g);
++        $this->assertTrue(is_array($arr));
++    }
++
++    public function testStandaloneDisjointSubsetUnion()
++    {
++        $g = $this->reader()->read(
++            'MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)),'.
++            '((10 10, 11 10, 11 11, 10 11, 10 10)))');
++        $u = GEOSDisjointSubsetUnion($g);
++        $this->assertNotNull($u);
++    }
++}
++
++ConstructionExtrasTest::run();
++
++?>
++--EXPECT--
++ConstructionExtrasTest->testReverseLineString	OK
++ConstructionExtrasTest->testDensifySpacing	OK
++ConstructionExtrasTest->testDensifyRequiresArg	OK
++ConstructionExtrasTest->testRemoveRepeatedPoints	OK
++ConstructionExtrasTest->testRemoveRepeatedPointsWithTolerance	OK
++ConstructionExtrasTest->testOrientPolygonsCCW	OK
++ConstructionExtrasTest->testOrientPolygonsCW	OK
++ConstructionExtrasTest->testEqualsIdenticalPositive	OK
++ConstructionExtrasTest->testEqualsIdenticalNegative	OK
++ConstructionExtrasTest->testGetXMinMaxYMinMax	OK
++ConstructionExtrasTest->testGetExtent	OK
++ConstructionExtrasTest->testBuildAreaMethod	OK
++ConstructionExtrasTest->testStandaloneBuildArea	OK
++ConstructionExtrasTest->testStandalonePolygonizeValid	OK
++ConstructionExtrasTest->testStandalonePolygonizeCutEdges	OK
++ConstructionExtrasTest->testStandaloneDisjointSubsetUnion	OK
+-- 
+2.34.1
+

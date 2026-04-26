@@ -7,7 +7,15 @@ http://pear.php.net/dtd/package-2.0.xsd">
   <channel>pecl.php.net</channel>
   <summary>PHP extension for interfacing with the GEOS library</summary>
   <description>
-    This extension provides a PECL package for the GEOS library.
+    This extension provides a PECL package for the GEOS library. The 1.1.x
+    series is an extended fork tracking GEOS 3.11+ (target 3.14.x) and exposes
+    the broader GEOS C API: CoordSeq, MakeValid, Concave/Polygon hulls,
+    precision-grid overlays, GeoJSON I/O, fix-structure WKT/WKB readers, hull
+    and metric extras, distance extras, linear-referencing extras, curved
+    geometry constructors, geometry construction factories, coverage
+    processing, clustering, constrained Delaunay, STRtree spatial index,
+    PreparedGeometry, coordinate-transform callbacks, and Hilbert/orientation
+    helpers.
   </description>
   <lead>
     <name>J Smith</name>
@@ -19,10 +27,15 @@ http://pear.php.net/dtd/package-2.0.xsd">
     <name>Sandro Santilli</name>
     <email>strk@kbt.io</email>
   </lead>
-  <date>2016-01-19</date>
+  <lead>
+    <name>Abraham van der Merwe</name>
+    <email>abz@frogfoot.com</email>
+    <active>yes</active>
+  </lead>
+  <date>2026-04-26</date>
   <version>
-    <release>0.0.1</release>
-    <api>0.0.1</api>
+    <release>1.1.0</release>
+    <api>1.1.0</api>
   </version>
   <stability>
     <release>stable</release>
@@ -30,27 +43,55 @@ http://pear.php.net/dtd/package-2.0.xsd">
   </stability>
   <license uri="">Mixed</license>
   <notes>
-- First release
+- Extended fork at https://github.com/avdmerwe/php-geos targeting libgeos 3.14.x.
+- Minimum required GEOS bumped to 3.11.0 (drops 3.10 fallbacks).
+- New class GEOSCoordSeq (foundation for curved/factory work, full Z/M).
+- New classes GEOSGeoJSONReader / GEOSGeoJSONWriter (RFC7946 geometry I/O).
+- New class GEOSSTRtree (insert/remove/query/iterate/nearest, callback API).
+- New class GEOSPreparedGeometry (predicates, distance, nearestPoints).
+- New class GEOSClusterResult (DBSCAN / by-distance / by-intersection).
+- GEOSGeometry: makeValid (linework + structure), concaveHull family,
+  polygonHullSimplify, precision-grid overlays (intersection / difference /
+  symDifference / union with optional gridSize), hull-and-metric extras
+  (minimumBoundingCircle, minimumRotatedRectangle, minimumWidth,
+  minimumClearance, maximumInscribedCircle, largestEmptyCircle), distance
+  extras (distanceWithin, distanceIndexed, nearestPoints, frechet/Hausdorff
+  variants), linear-referencing extras (lineSubstring, lineMergeDirected),
+  construction utilities (reverse, densify, removeRepeatedPoints,
+  orientPolygons, equalsIdentical, getX/Y min/max, getExtent, buildArea),
+  curved-geometry constructors (CircularString, CompoundCurve, CurvePolygon),
+  coverage processing (coverageUnion, coverageIsValid, coverageSimplifyVW,
+  coverageClean), clustering (clusterDBSCAN, clusterByDistance,
+  clusterByIntersection), constrained Delaunay, geometry construction
+  factories (createPoint*, createLineString, createLinearRing, createPolygon,
+  createCollection, createRectangle), coordinate-transform callbacks
+  (transformXY, transformXYZ), and P2 fillers (hilbertCode,
+  gridIntersectionFractions, orientationIndex, segmentIntersection).
+- WKT/WKB readers gain setFixStructure(); WKB writer gains
+  setFlavor()/getFlavor() with GEOSWKB_EXTENDED (default) and GEOSWKB_ISO.
+- Backwards compatible with 1.0.0 callers (no removed/renamed methods).
+- Tests: 25 .phpt files, all green against libgeos 3.14.1.
   </notes>
   <contents>
     <dir name="/">
       <file role="src" name="geos.c"/>
       <file role="src" name="php_geos.h"/>
       <file role="src" name="config.m4"/>
+      <file role="src" name="arginfo.h"/>
       <file role="doc" name="COPYING"/>
       <file role="doc" name="CREDITS"/>
       <file role="doc" name="LGPL-2"/>
       <file role="doc" name="MIT-LICENSE"/>
-      <dir name="/">
-        <file role="test" name="test.php"/>
-        <file role="test" name="crashme.php"/>
+      <file role="doc" name="README.md"/>
+      <dir name="tests">
+        <file role="test" name="TestHelper.php"/>
       </dir>
     </dir>
   </contents>
   <dependencies>
     <required>
       <php>
-        <min>5.6.0</min>
+        <min>7.0.0</min>
       </php>
       <pearinstaller>
         <min>1.4.0b1</min>
@@ -62,6 +103,19 @@ http://pear.php.net/dtd/package-2.0.xsd">
     <configureoption name="with-geos-config" default="no" prompt="geos-config directory"/>
   </extsrcrelease>
   <changelog>
+    <release>
+      <stability><release>stable</release><api>stable</api></stability>
+      <version><release>1.1.0</release><api>1.1.0</api></version>
+      <date>2026-04-26</date>
+      <notes>
+- Extended fork tracking libgeos 3.14.x.
+- Minimum GEOS bumped to 3.11.0.
+- ~80 new methods + 6 new classes covering CoordSeq, MakeValid,
+  ConcaveHull, GeoJSON, STRtree, PreparedGeometry, clustering, coverage,
+  curved geometries, factories, transforms, and more.
+- Backwards compatible with 1.0.0 callers.
+      </notes>
+    </release>
     <release>
       <stability><release>stable</release><api>stable</api></stability>
       <version><release>0.0.1</release><api>0.0.1</api></version>

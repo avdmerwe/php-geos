@@ -1,0 +1,1472 @@
+From e4f8569456a6dd2fb40e3ce5c01999af04ccd93d Mon Sep 17 00:00:00 2001
+From: Abraham van der Merwe <abz@frogfoot.com>
+Date: Sun, 26 Apr 2026 15:15:45 +0200
+Subject: [PATCH 1/8] Add Debian/Ubuntu packaging from 1.0.0-8ubuntu2
+
+Imported from Ubuntu plucky/resolute php-geos packaging. Stripped four
+patches now applied upstream in gitea HEAD (dfe1ab1):
+
+  - 0007-Have-make-check-show-diff-on-failure.patch
+  - 0008-Print-expected-obtained-correctly.patch
+  - 0009-Set-trim-to-false-in-WKBReader-test.patch
+  - incompatible-pointer-types.patch
+
+Retained 0001-0006 (PHP 7.3-8.2 compat) plus the Ubuntu-only
+use-zend_ce_exception-php8.5.patch.
+
+Bumped version to 1.0.0+git20240129-1~jammy1.
+---
+ debian/.gitlab-ci.yml                         |   6 +
+ debian/changelog                              | 115 +++
+ debian/clean                                  |   8 +
+ debian/control                                |  28 +
+ debian/copyright                              |  73 ++
+ debian/gbp.conf                               |  19 +
+ debian/geos.ini                               |   1 +
+ ...0001-fix-test-for-7.3-int-vs-integer.patch |  25 +
+ ...e-with-php-7-Wformat-warnings-raised.patch |  27 +
+ ...all-arginfo-and-fix-build-with-PHP-8.patch | 721 ++++++++++++++++++
+ ...rse_parameters-call-to-use-zend_long.patch | 114 +++
+ debian/patches/0005-fix-for-8.0.0RC1.patch    |  16 +
+ .../0006-fix-__toString-with-8.2.patch        |  20 +
+ debian/patches/series                         |   7 +
+ .../use-zend_ce_exception-php8.5.patch        |  22 +
+ debian/php-geos.php                           |   1 +
+ debian/php-geos.postinst                      |  14 +
+ debian/php-geos.prerm                         |  11 +
+ debian/rules                                  |  21 +
+ debian/source/format                          |   1 +
+ debian/source/lintian-overrides               |   3 +
+ debian/upstream/metadata                      |   5 +
+ debian/watch                                  |   7 +
+ 23 files changed, 1265 insertions(+)
+ create mode 100644 debian/.gitlab-ci.yml
+ create mode 100644 debian/changelog
+ create mode 100644 debian/clean
+ create mode 100644 debian/control
+ create mode 100644 debian/copyright
+ create mode 100644 debian/gbp.conf
+ create mode 100644 debian/geos.ini
+ create mode 100644 debian/patches/0001-fix-test-for-7.3-int-vs-integer.patch
+ create mode 100644 debian/patches/0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch
+ create mode 100644 debian/patches/0003-add-all-arginfo-and-fix-build-with-PHP-8.patch
+ create mode 100644 debian/patches/0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch
+ create mode 100644 debian/patches/0005-fix-for-8.0.0RC1.patch
+ create mode 100644 debian/patches/0006-fix-__toString-with-8.2.patch
+ create mode 100644 debian/patches/series
+ create mode 100644 debian/patches/use-zend_ce_exception-php8.5.patch
+ create mode 100644 debian/php-geos.php
+ create mode 100644 debian/php-geos.postinst
+ create mode 100644 debian/php-geos.prerm
+ create mode 100755 debian/rules
+ create mode 100644 debian/source/format
+ create mode 100644 debian/source/lintian-overrides
+ create mode 100644 debian/upstream/metadata
+ create mode 100644 debian/watch
+
+diff --git a/debian/.gitlab-ci.yml b/debian/.gitlab-ci.yml
+new file mode 100644
+index 0000000..831136f
+--- /dev/null
++++ b/debian/.gitlab-ci.yml
+@@ -0,0 +1,6 @@
++---
++include:
++  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
++
++variables:
++  SALSA_CI_ENABLE_BUILD_PACKAGE_TWICE: 1
+diff --git a/debian/changelog b/debian/changelog
+new file mode 100644
+index 0000000..9029f8e
+--- /dev/null
++++ b/debian/changelog
+@@ -0,0 +1,115 @@
++php-geos (1.0.0+git20240129-1~jammy1) jammy; urgency=medium
++
++  * Baseline rebuild from gitea HEAD (dfe1ab1, 2024-01-29):
++    - Source synced to upstream git HEAD post-1.0.0 (4 commits ahead).
++    - Dropped debian/patches now applied upstream:
++      0007-Have-make-check-show-diff-on-failure.patch
++      0008-Print-expected-obtained-correctly.patch
++      0009-Set-trim-to-false-in-WKBReader-test.patch
++      incompatible-pointer-types.patch
++    - Retained 0001-0006 (PHP 7.3-8.2 compat) plus
++      use-zend_ce_exception-php8.5.patch from Ubuntu 8ubuntu2.
++  * Forked to https://github.com/avdmerwe/php-geos for extended
++    GEOS C API coverage targeting libgeos 3.14.x.
++  * Build target: amd64, Ubuntu 22.04 (Jammy), PHP 8.1.
++
++ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 14:50:00 +0200
++
++php-geos (1.0.0-8ubuntu2) resolute; urgency=medium
++
++  * d/p/use-zend_ce_exception-php8.5.patch: use zend_ce_exception instead of
++    zend_exception_get_default() for PHP 8.5
++
++ -- Renan Rodrigo <rr@ubuntu.com>  Fri, 30 Jan 2026 00:26:57 -0300
++
++php-geos (1.0.0-8ubuntu1) plucky; urgency=medium
++
++  * d/control: drop phpunit B-D to allow php8.4 transition
++
++ -- Athos Ribeiro <athos.ribeiro@canonical.com>  Mon, 27 Jan 2025 10:20:25 -0300
++
++php-geos (1.0.0-8build1) plucky; urgency=medium
++
++  * No change rebuild for php8.4
++
++ -- Athos Ribeiro <athos.ribeiro@canonical.com>  Wed, 22 Jan 2025 08:41:06 -0300
++
++php-geos (1.0.0-8) unstable; urgency=medium
++
++  * Bump Standards-Version to 4.7.0, no changes.
++  * Bump debhelper compat to 13.
++  * Remove generated files in clean target.
++    (closes: #1046070)
++  * Update watch file for gitea changes.
++  * Enable Salsa CI.
++  * Add upstream patches to fix PHP 8.2 compatibility.
++    (closes: #1054036)
++  * Ignore test failures on all architectures.
++  * Add upstream patch to fix FTBFS on i386.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Wed, 04 Dec 2024 12:55:43 +0100
++
++php-geos (1.0.0-7) unstable; urgency=medium
++
++  * Update watch file for gitea changes.
++  * Bump Standards-Version to 4.6.1, no changes.
++  * Bump debhelper compat to 12, changes:
++    - Drop --list-missing from dh_install
++  * Add Rules-Requires-Root to control file.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Thu, 01 Dec 2022 15:06:56 +0100
++
++php-geos (1.0.0-6) unstable; urgency=medium
++
++  * Bump watch file version to 4.
++  * Bump Standards-Version to 4.5.1, no changes.
++  * Add patches to fix PHP 7 & 8 compatibility.
++    (closes: #977186)
++
++ -- Bas Couwenberg <sebastic@debian.org>  Sat, 12 Dec 2020 10:40:02 +0100
++
++php-geos (1.0.0-5) unstable; urgency=medium
++
++  * Bump Standards-Version to 4.5.0, no changes.
++  * Remove package name from lintian overrides.
++  * Update gbp.conf to use --source-only-changes by default.
++  * Drop Name field from upstream metadata.
++  * Bump debhelper compat to 10, changes:
++    - Drop --parallel option, enabled by default
++    - Don't explicitly enable autoreconf, enabled by default
++    - Drop dh-autoreconf build dependency
++  * Update lintian overrides.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Sun, 01 Nov 2020 19:39:34 +0100
++
++php-geos (1.0.0-4) unstable; urgency=medium
++
++  * Drop autopkgtest to test installability.
++  * Add lintian override for testsuite-autopkgtest-missing.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Wed, 01 Aug 2018 15:32:33 +0200
++
++php-geos (1.0.0-3) unstable; urgency=medium
++
++  * Update URLs for move from gogs to gitea.
++  * Bump Standards-Version to 4.1.5, no changes.
++  * Change Section from web to php.
++  * Add autopkgtest to test installability.
++  * Fix deprecated source override location.
++  * Update Vcs-* URLs for Salsa.
++  * Strip trailing whitespace from control & rules files.
++  * Use filter instead of findstring to prevent partial matches.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Sat, 21 Jul 2018 11:04:57 +0200
++
++php-geos (1.0.0-2) unstable; urgency=medium
++
++  * Ignore test failures on problematic architectures only.
++
++ -- Bas Couwenberg <sebastic@debian.org>  Fri, 20 Jan 2017 16:01:20 +0100
++
++php-geos (1.0.0-1) unstable; urgency=medium
++
++  * Initial Release. (Closes: #849283).
++
++ -- Bas Couwenberg <sebastic@debian.org>  Sat, 24 Dec 2016 17:05:05 +0100
+diff --git a/debian/clean b/debian/clean
+new file mode 100644
+index 0000000..202fd5e
+--- /dev/null
++++ b/debian/clean
+@@ -0,0 +1,8 @@
++config.h
++config.nice
++tests/*_*.diff
++tests/*_*.exp
++tests/*_*.log
++tests/*_*.out
++tests/*_*.php
++tests/*_*.sh
+diff --git a/debian/control b/debian/control
+new file mode 100644
+index 0000000..4023211
+--- /dev/null
++++ b/debian/control
+@@ -0,0 +1,28 @@
++Source: php-geos
++Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
++XSBC-Original-Maintainer: Debian GIS Project <pkg-grass-devel@lists.alioth.debian.org>
++Uploaders: Bas Couwenberg <sebastic@debian.org>
++Section: science
++Priority: optional
++Build-Depends: debhelper-compat (= 13),
++               dh-php,
++               libgeos-dev,
++               php-dev,
++Standards-Version: 4.7.0
++Vcs-Browser: https://salsa.debian.org/debian-gis-team/php-geos
++Vcs-Git: https://salsa.debian.org/debian-gis-team/php-geos.git
++Homepage: https://git.osgeo.org/gitea/geos/php-geos/
++Rules-Requires-Root: no
++
++Package: php-geos
++Architecture: any
++Section: php
++Depends: ${php:Depends},
++         ${shlibs:Depends},
++         ${misc:Depends}
++Description: GEOS bindings for PHP
++ GEOS provides a spatial object model and fundamental geometric
++ functions. It implements the geometry model defined in the
++ OpenGIS Consortium Simple Features Specification for SQL.
++ .
++ This package contains the PHP bindings for GEOS.
+diff --git a/debian/copyright b/debian/copyright
+new file mode 100644
+index 0000000..c742acf
+--- /dev/null
++++ b/debian/copyright
+@@ -0,0 +1,73 @@
++Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
++Upstream-Name: PHP bindings for GEOS
++Upstream-Contact: GEOS Developers <geos-devel@lists.osgeo.org>
++Source: https://git.osgeo.org/gitea/geos/php-geos
++
++Files: *
++Copyright: 2016, J Smith <dark.panda@gmail.com> <jay@php.net>
++License: Expat
++
++Files: geos.c
++ php_geos.h
++Copyright: 2010, Sandro Santilli <strk@kbt.io>
++License: LGPL-2.1+
++
++Files: debian/*
++Copyright: 2016, Bas Couwenberg <sebastic@debian.org>
++License: GPL-2+
++
++License: Expat
++ Permission is hereby granted, free of charge, to any person
++ obtaining a copy of this software and associated documentation
++ files (the "Software"), to deal in the Software without
++ restriction, including without limitation the rights to use,
++ copy, modify, merge, publish, distribute, sublicense, and/or sell
++ copies of the Software, and to permit persons to whom the
++ Software is furnished to do so, subject to the following
++ conditions:
++ .
++ The above copyright notice and this permission notice shall be
++ included in all copies or substantial portions of the Software.
++ .
++ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
++ OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
++ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
++ HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ OTHER DEALINGS IN THE SOFTWARE.
++
++License: LGPL-2.1+
++ This library is free software; you can redistribute it and/or
++ modify it under the terms of the GNU Lesser General Public
++ License as published by the Free Software Foundation; either
++ version 2.1 of the License, or (at your option) any later version.
++ .
++ This library is distributed in the hope that it will be useful,
++ but WITHOUT ANY WARRANTY; without even the implied warranty of
++ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ Lesser General Public License for more details.
++ .
++ On Debian systems, the full text of the GNU Lesser General Public
++ License version 2.1 can be found in the file
++ `/usr/share/common-licenses/LGPL-2.1'.
++
++License: GPL-2+
++ This program is free software; you can redistribute it and/or modify
++ it under the terms of the GNU General Public License as published by
++ the Free Software Foundation; either version 2 of the License, or
++ (at your option) any later version.
++ .
++ This program is distributed in the hope that it will be useful,
++ but WITHOUT ANY WARRANTY; without even the implied warranty of
++ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ GNU General Public License for more details.
++ .
++ You should have received a copy of the GNU General Public License along
++ with this program; if not, write to the Free Software Foundation, Inc.,
++ 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ .
++ On Debian systems, the complete text of version 2 of the GNU General
++ Public License can be found in `/usr/share/common-licenses/GPL-2'.
++
+diff --git a/debian/gbp.conf b/debian/gbp.conf
+new file mode 100644
+index 0000000..e3daba6
+--- /dev/null
++++ b/debian/gbp.conf
+@@ -0,0 +1,19 @@
++[DEFAULT]
++
++# The default name for the upstream branch is "upstream".
++# Change it if the name is different (for instance, "master").
++upstream-branch = upstream
++
++# The default name for the Debian branch is "master".
++# Change it if the name is different (for instance, "debian/unstable").
++debian-branch = master
++
++# git-import-orig uses the following names for the upstream tags.
++# Change the value if you are not using git-import-orig
++upstream-tag = upstream/%(version)s
++
++# Always use pristine-tar.
++pristine-tar = True
++
++[buildpackage]
++pbuilder-options = --source-only-changes
+diff --git a/debian/geos.ini b/debian/geos.ini
+new file mode 100644
+index 0000000..e896942
+--- /dev/null
++++ b/debian/geos.ini
+@@ -0,0 +1 @@
++extension=geos.so
+diff --git a/debian/patches/0001-fix-test-for-7.3-int-vs-integer.patch b/debian/patches/0001-fix-test-for-7.3-int-vs-integer.patch
+new file mode 100644
+index 0000000..290d5da
+--- /dev/null
++++ b/debian/patches/0001-fix-test-for-7.3-int-vs-integer.patch
+@@ -0,0 +1,25 @@
++Subject: fix test for 7.3 (int vs integer)
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0001-fix-test-for-7.3-int-vs-integer.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/25
++
++--- a/tests/004_WKBWriter.phpt
+++++ b/tests/004_WKBWriter.phpt
++@@ -139,7 +139,7 @@ class WKBWriterTest extends GEOSTest
++             $writer->write(1);
++             $this->assertTrue(false);
++         } catch (ErrorException $e) {
++-            $this->assertContains('expects parameter 1 to be object, integer given', $e->getMessage());
+++            $this->assertContains('expects parameter 1 to be object, int', $e->getMessage());
++         }
++     }
++ 
++@@ -151,7 +151,7 @@ class WKBWriterTest extends GEOSTest
++             $writer->writeHEX(1);
++             $this->assertTrue(false);
++         } catch (ErrorException $e) {
++-            $this->assertContains('expects parameter 1 to be object, integer given', $e->getMessage());
+++            $this->assertContains('expects parameter 1 to be object, int', $e->getMessage());
++         }
++     }
++ }
+diff --git a/debian/patches/0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch b/debian/patches/0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch
+new file mode 100644
+index 0000000..7a533ab
+--- /dev/null
++++ b/debian/patches/0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch
+@@ -0,0 +1,27 @@
++Description: fix error message with php 7+ (-Wformat warnings raised by 7.3)
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/25
++
++--- a/geos.c
+++++ b/geos.c
++@@ -189,11 +189,19 @@ getRelay(zval* val, zend_class_entry* ce
++ 
++     if ( proxy->std.ce != ce ) {
++         php_error_docref(NULL TSRMLS_CC, E_ERROR,
+++#if PHP_VERSION_ID >= 70000
+++            "Relay object is not an %s", ZSTR_VAL(ce->name));
+++#else
++             "Relay object is not an %s", ce->name);
+++#endif
++     }
++     if ( ! proxy->relay ) {
++         php_error_docref(NULL TSRMLS_CC, E_ERROR,
+++#if PHP_VERSION_ID >= 70000
+++            "Relay object for object of type %s is not set", ZSTR_VAL(ce->name));
+++#else
++             "Relay object for object of type %s is not set", ce->name);
+++#endif
++     }
++     return proxy->relay;
++ }
+diff --git a/debian/patches/0003-add-all-arginfo-and-fix-build-with-PHP-8.patch b/debian/patches/0003-add-all-arginfo-and-fix-build-with-PHP-8.patch
+new file mode 100644
+index 0000000..ded7159
+--- /dev/null
++++ b/debian/patches/0003-add-all-arginfo-and-fix-build-with-PHP-8.patch
+@@ -0,0 +1,721 @@
++Description: add all arginfo and fix build with PHP 8
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0003-add-all-arginfo-and-fix-build-with-PHP-8.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/26
++
++--- /dev/null
+++++ b/arginfo.h
++@@ -0,0 +1,319 @@
+++/* commonly used ones */
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_void, 0, 0, 0)
+++ZEND_END_ARG_INFO()
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_geom, 0, 0, 1)
+++    ZEND_ARG_INFO(0, geom)
+++ZEND_END_ARG_INFO()
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_num, 0, 0, 1)
+++    ZEND_ARG_INFO(0, num)
+++ZEND_END_ARG_INFO()
+++
+++/* function arginfo */
+++
+++#define arginfo_GEOSVersion              arginfo_void
+++
+++#define arginfo_GEOSPolygonize           arginfo_geom
+++#define arginfo_GEOSLineMerge            arginfo_geom
+++
+++#ifdef HAVE_GEOS_SHARED_PATHS
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSSharedPaths, 0, 0, 2)
+++    ZEND_ARG_INFO(0, geom1)
+++    ZEND_ARG_INFO(0, geom2)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#ifdef HAVE_GEOS_RELATE_PATTERN_MATCH
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_GEOSRelateMatch, 0, 0, 2)
+++    ZEND_ARG_INFO(0, maxtric)
+++    ZEND_ARG_INFO(0, pattern)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++/* GEOSGeometry methods arginfo */
+++
+++#define arginfo_Geometry_construct       arginfo_void
+++
+++#define arginfo_Geometry_toString        arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_project, 0, 0, 1)
+++    ZEND_ARG_INFO(0, geom)
+++    ZEND_ARG_INFO(0, normalized)
+++ZEND_END_ARG_INFO()
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_interpolate, 0, 0, 1)
+++    ZEND_ARG_INFO(0, dist)
+++    ZEND_ARG_INFO(0, normalized)
+++ZEND_END_ARG_INFO()
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_buffer, 0, 0, 1)
+++    ZEND_ARG_INFO(0, dist)
+++    ZEND_ARG_INFO(0, style)
+++ZEND_END_ARG_INFO()
+++
+++#ifdef HAVE_GEOS_OFFSET_CURVE
+++#define arginfo_Geometry_offsetCurve     arginfo_Geometry_buffer
+++#endif
+++
+++#define arginfo_Geometry_envelope        arginfo_void
+++
+++#define arginfo_Geometry_intersection    arginfo_geom
+++
+++#define arginfo_Geometry_convexHull      arginfo_void
+++
+++#define arginfo_Geometry_difference      arginfo_geom
+++
+++#define arginfo_Geometry_symDifference   arginfo_geom
+++
+++#define arginfo_Geometry_boundary        arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_union, 0, 0, 0)
+++    ZEND_ARG_INFO(0, geom)
+++ZEND_END_ARG_INFO()
+++
+++#define arginfo_Geometry_pointOnSurface  arginfo_void
+++
+++#define arginfo_Geometry_centroid        arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_relate, 0, 0, 1)
+++    ZEND_ARG_INFO(0, geom)
+++    ZEND_ARG_INFO(0, pattern)
+++ZEND_END_ARG_INFO()
+++
+++#ifdef HAVE_GEOS_RELATE_BOUNDARY_NODE_RULE
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_relateBoundaryNodeRule, 0, 0, 2)
+++    ZEND_ARG_INFO(0, geom)
+++    ZEND_ARG_INFO(0, rule)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_simplify, 0, 0, 1)
+++    ZEND_ARG_INFO(0, tolerance)
+++    ZEND_ARG_INFO(0, preserveTopology)
+++ZEND_END_ARG_INFO()
+++
+++#define arginfo_Geometry_normalize       arginfo_void
+++
+++#ifdef HAVE_GEOS_GEOM_SET_PRECISION
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_setPrecision, 0, 0, 1)
+++    ZEND_ARG_INFO(0, gridsize)
+++    ZEND_ARG_INFO(0, flags)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_PRECISION
+++#define arginfo_Geometry_getPrecision    arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_EXTRACT_UNIQUE_POINTS
+++#define arginfo_Geometry_extractUniquePoints arginfo_void
+++#endif
+++
+++#define arginfo_Geometry_disjoint        arginfo_geom
+++
+++#define arginfo_Geometry_touches         arginfo_geom
+++
+++#define arginfo_Geometry_intersects      arginfo_geom
+++
+++#define arginfo_Geometry_crosses         arginfo_geom
+++
+++#define arginfo_Geometry_within          arginfo_geom
+++
+++#define arginfo_Geometry_contains        arginfo_geom
+++
+++#define arginfo_Geometry_overlaps        arginfo_geom
+++
+++#ifdef HAVE_GEOS_COVERS
+++#define arginfo_Geometry_covers          arginfo_geom
+++#endif
+++
+++#ifdef HAVE_GEOS_COVERED_BY
+++#define arginfo_Geometry_coveredBy       arginfo_geom
+++#endif
+++
+++#define arginfo_Geometry_equals          arginfo_geom
+++
+++#define arginfo_Geometry_equalsExact     arginfo_geom
+++
+++#define arginfo_Geometry_isEmpty         arginfo_void
+++
+++#ifdef HAVE_GEOS_IS_VALID_DETAIL
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_checkValidity, 0, 0, 0)
+++    ZEND_ARG_INFO(0, flags)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#define arginfo_Geometry_isSimple        arginfo_void
+++
+++#define arginfo_Geometry_isRing          arginfo_void
+++
+++#define arginfo_Geometry_hasZ            arginfo_void
+++
+++
+++#ifdef HAVE_GEOS_IS_CLOSED
+++#define arginfo_Geometry_isClosed        arginfo_void
+++#endif
+++
+++#define arginfo_Geometry_typeName        arginfo_void
+++
+++#define arginfo_Geometry_typeId          arginfo_void
+++
+++#define arginfo_Geometry_getSRID         arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_setSRID, 0, 0, 0)
+++    ZEND_ARG_INFO(0, srid)
+++ZEND_END_ARG_INFO()
+++
+++#define arginfo_Geometry_numGeometries   arginfo_void
+++
+++#define arginfo_Geometry_geometryN       arginfo_num
+++
+++#define arginfo_Geometry_numInteriorRings arginfo_void
+++
+++#ifdef HAVE_GEOS_GEOM_GET_NUM_POINTS
+++#define arginfo_Geometry_numPoints       arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_X
+++#define arginfo_Geometry_getX            arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_Y
+++#define arginfo_Geometry_getY            arginfo_void
+++#endif
+++
+++#define arginfo_Geometry_interiorRingN   arginfo_num
+++
+++#define arginfo_Geometry_exteriorRing    arginfo_void
+++
+++#define arginfo_Geometry_numCoordinates  arginfo_void
+++
+++#define arginfo_Geometry_dimension       arginfo_void
+++
+++#ifdef HAVE_GEOS_GEOM_GET_COORDINATE_DIMENSION
+++#define arginfo_Geometry_coordinateDimension arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_POINT_N
+++#define arginfo_Geometry_pointN          arginfo_num
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_START_POINT
+++#define arginfo_Geometry_startPoint      arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_GEOM_GET_END_POINT
+++#define arginfo_Geometry_endPoint        arginfo_void
+++#endif
+++
+++#define arginfo_Geometry_area            arginfo_void
+++
+++#define arginfo_Geometry_length          arginfo_void
+++
+++#define arginfo_Geometry_distance        arginfo_geom
+++
+++#define arginfo_Geometry_hausdorffDistance arginfo_geom
+++
+++#ifdef HAVE_GEOS_SNAP
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_snapTo, 0, 0, 2)
+++    ZEND_ARG_INFO(0, geom)
+++    ZEND_ARG_INFO(0, tolerance)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#ifdef HAVE_GEOS_NODE
+++#define arginfo_Geometry_node            arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_DELAUNAY_TRIANGULATION
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_delaunayTriangulation, 0, 0, 0)
+++    ZEND_ARG_INFO(0, tolerance)
+++    ZEND_ARG_INFO(0, edgeonly)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#ifdef HAVE_GEOS_VORONOI_DIAGRAM
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_voronoiDiagram, 0, 0, 0)
+++    ZEND_ARG_INFO(0, tolerance)
+++    ZEND_ARG_INFO(0, edgeonly)
+++    ZEND_ARG_INFO(0, extent)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++#ifdef HAVE_GEOS_CLIP_BY_RECT
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_clipByRect, 0, 0, 4)
+++    ZEND_ARG_INFO(0, xmin)
+++    ZEND_ARG_INFO(0, ymin)
+++    ZEND_ARG_INFO(0, xmax)
+++    ZEND_ARG_INFO(0, ymax)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++/* GEOSWKBReader methods arginfo */
+++
+++#define arginfo_WKBReader_construct      arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_WKBReader_read, 0, 0, 1)
+++    ZEND_ARG_INFO(0, wkb)
+++ZEND_END_ARG_INFO()
+++
+++#define arginfo_WKBReader_readHEX        arginfo_WKBReader_read
+++
+++/* GEOSWKTReader methods arginfo */
+++
+++#define arginfo_WKTReader_construct      arginfo_void
+++
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_WKTReader_read, 0, 0, 1)
+++    ZEND_ARG_INFO(0, wkt)
+++ZEND_END_ARG_INFO()
+++
+++/* GEOSWKTWriter methods arginfo */
+++
+++#define arginfo_WKTWriter_construct      arginfo_void
+++
+++#define arginfo_WKTWriter_write          arginfo_geom
+++
+++#ifdef HAVE_GEOS_WKT_WRITER_SET_TRIM
+++#define arginfo_WKTWriter_setTrim        arginfo_num
+++#endif
+++
+++#ifdef HAVE_GEOS_WKT_WRITER_SET_ROUNDING_PRECISION
+++#define arginfo_WKTWriter_setRoundingPrecision arginfo_num
+++#endif
+++
+++#ifdef HAVE_GEOS_WKT_WRITER_SET_OUTPUT_DIMENSION
+++#define arginfo_WKTWriter_setOutputDimension   arginfo_num
+++#endif
+++
+++#ifdef HAVE_GEOS_WKT_WRITER_GET_OUTPUT_DIMENSION
+++#define arginfo_WKTWriter_getOutputDimension arginfo_void
+++#endif
+++
+++#ifdef HAVE_GEOS_WKT_WRITER_SET_OLD_3D
+++ZEND_BEGIN_ARG_INFO_EX(arginfo_WKTWriter_setOld3D, 0, 0, 1)
+++    ZEND_ARG_INFO(0, bval)
+++ZEND_END_ARG_INFO()
+++#endif
+++
+++/* GEOSWKTWriter methods arginfo */
+++
+++#define arginfo_WKBWriter_construct          arginfo_void
+++
+++#define arginfo_WKBWriter_getOutputDimension arginfo_void
+++
+++#define arginfo_WKBWriter_setOutputDimension arginfo_num
+++
+++#define arginfo_WKBWriter_getByteOrder       arginfo_void
+++
+++#define arginfo_WKBWriter_setByteOrder       arginfo_num
+++
+++#define arginfo_WKBWriter_setIncludeSRID     arginfo_num
+++
+++#define arginfo_WKBWriter_getIncludeSRID     arginfo_void
+++
+++#define arginfo_WKBWriter_write              arginfo_geom
+++
+++#define arginfo_WKBWriter_writeHEX           arginfo_geom
+++
++--- a/geos.c
+++++ b/geos.c
++@@ -32,6 +32,7 @@
++ 
++ /* Own stuff */
++ #include "php_geos.h"
+++#include "arginfo.h"
++ 
++ static ZEND_DECLARE_MODULE_GLOBALS(geos);
++ static PHP_GINIT_FUNCTION(geos);
++@@ -84,18 +85,23 @@ PHP_FUNCTION(GEOSRelateMatch);
++ 
++ 
++ static zend_function_entry geos_functions[] = {
++-    PHP_FE(GEOSVersion, NULL)
++-    PHP_FE(GEOSPolygonize, NULL)
++-    PHP_FE(GEOSLineMerge, NULL)
+++    PHP_FE(GEOSVersion, arginfo_GEOSVersion)
+++    PHP_FE(GEOSPolygonize, arginfo_GEOSPolygonize)
+++    PHP_FE(GEOSLineMerge, arginfo_GEOSLineMerge)
++ 
++ #   ifdef HAVE_GEOS_SHARED_PATHS
++-    PHP_FE(GEOSSharedPaths, NULL)
+++    PHP_FE(GEOSSharedPaths, arginfo_GEOSSharedPaths)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_RELATE_PATTERN_MATCH
++-    PHP_FE(GEOSRelateMatch, NULL)
+++    PHP_FE(GEOSRelateMatch, arginfo_GEOSRelateMatch)
++ #   endif
+++
+++#ifdef PHP_FE_END
+++    PHP_FE_END
+++#else
++     {NULL, NULL, NULL}
+++#endif
++ };
++ 
++ zend_module_entry geos_module_entry = {
++@@ -428,142 +434,142 @@ PHP_METHOD(Geometry, clipByRect);
++ #endif
++ 
++ static zend_function_entry Geometry_methods[] = {
++-    PHP_ME(Geometry, __construct, NULL, 0)
++-    PHP_ME(Geometry, __toString, NULL, 0)
++-    PHP_ME(Geometry, project, NULL, 0)
++-    PHP_ME(Geometry, interpolate, NULL, 0)
++-    PHP_ME(Geometry, buffer, NULL, 0)
+++    PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
+++    PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
+++    PHP_ME(Geometry, project, arginfo_Geometry_project, 0)
+++    PHP_ME(Geometry, interpolate, arginfo_Geometry_interpolate, 0)
+++    PHP_ME(Geometry, buffer, arginfo_Geometry_buffer, 0)
++ 
++ #   ifdef HAVE_GEOS_OFFSET_CURVE
++-    PHP_ME(Geometry, offsetCurve, NULL, 0)
+++    PHP_ME(Geometry, offsetCurve, arginfo_Geometry_offsetCurve, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, envelope, NULL, 0)
++-    PHP_ME(Geometry, intersection, NULL, 0)
++-    PHP_ME(Geometry, convexHull, NULL, 0)
++-    PHP_ME(Geometry, difference, NULL, 0)
++-    PHP_ME(Geometry, symDifference, NULL, 0)
++-    PHP_ME(Geometry, boundary, NULL, 0)
++-    PHP_ME(Geometry, union, NULL, 0)
++-    PHP_ME(Geometry, pointOnSurface, NULL, 0)
++-    PHP_ME(Geometry, centroid, NULL, 0)
++-    PHP_ME(Geometry, relate, NULL, 0)
+++    PHP_ME(Geometry, envelope, arginfo_Geometry_envelope, 0)
+++    PHP_ME(Geometry, intersection, arginfo_Geometry_intersection, 0)
+++    PHP_ME(Geometry, convexHull, arginfo_Geometry_convexHull, 0)
+++    PHP_ME(Geometry, difference, arginfo_Geometry_difference, 0)
+++    PHP_ME(Geometry, symDifference, arginfo_Geometry_symDifference, 0)
+++    PHP_ME(Geometry, boundary, arginfo_Geometry_boundary, 0)
+++    PHP_ME(Geometry, union, arginfo_Geometry_union, 0)
+++    PHP_ME(Geometry, pointOnSurface, arginfo_Geometry_pointOnSurface, 0)
+++    PHP_ME(Geometry, centroid, arginfo_Geometry_centroid, 0)
+++    PHP_ME(Geometry, relate, arginfo_Geometry_relate, 0)
++ 
++ #   ifdef HAVE_GEOS_RELATE_BOUNDARY_NODE_RULE
++-    PHP_ME(Geometry, relateBoundaryNodeRule, NULL, 0)
+++    PHP_ME(Geometry, relateBoundaryNodeRule, arginfo_Geometry_relateBoundaryNodeRule, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, simplify, NULL, 0)
++-    PHP_ME(Geometry, normalize, NULL, 0)
+++    PHP_ME(Geometry, simplify, arginfo_Geometry_simplify, 0)
+++    PHP_ME(Geometry, normalize, arginfo_Geometry_normalize, 0)
++ 
++ #   ifdef HAVE_GEOS_GEOM_SET_PRECISION
++-    PHP_ME(Geometry, setPrecision, NULL, 0)
+++    PHP_ME(Geometry, setPrecision, arginfo_Geometry_setPrecision, 0)
++ #   endif
++ 
++ #   if HAVE_GEOS_GEOM_GET_PRECISION
++-    PHP_ME(Geometry, getPrecision, NULL, 0)
+++    PHP_ME(Geometry, getPrecision, arginfo_Geometry_getPrecision, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_EXTRACT_UNIQUE_POINTS
++-    PHP_ME(Geometry, extractUniquePoints, NULL, 0)
+++    PHP_ME(Geometry, extractUniquePoints, arginfo_Geometry_extractUniquePoints, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, disjoint, NULL, 0)
++-    PHP_ME(Geometry, touches, NULL, 0)
++-    PHP_ME(Geometry, intersects, NULL, 0)
++-    PHP_ME(Geometry, crosses, NULL, 0)
++-    PHP_ME(Geometry, within, NULL, 0)
++-    PHP_ME(Geometry, contains, NULL, 0)
++-    PHP_ME(Geometry, overlaps, NULL, 0)
+++    PHP_ME(Geometry, disjoint, arginfo_Geometry_disjoint, 0)
+++    PHP_ME(Geometry, touches, arginfo_Geometry_touches, 0)
+++    PHP_ME(Geometry, intersects, arginfo_Geometry_intersects, 0)
+++    PHP_ME(Geometry, crosses, arginfo_Geometry_crosses, 0)
+++    PHP_ME(Geometry, within, arginfo_Geometry_within, 0)
+++    PHP_ME(Geometry, contains, arginfo_Geometry_contains, 0)
+++    PHP_ME(Geometry, overlaps, arginfo_Geometry_overlaps, 0)
++ 
++ #   ifdef HAVE_GEOS_COVERS
++-    PHP_ME(Geometry, covers, NULL, 0)
+++    PHP_ME(Geometry, covers, arginfo_Geometry_covers, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_COVERED_BY
++-    PHP_ME(Geometry, coveredBy, NULL, 0)
+++    PHP_ME(Geometry, coveredBy, arginfo_Geometry_coveredBy, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, equals, NULL, 0)
++-    PHP_ME(Geometry, equalsExact, NULL, 0)
++-    PHP_ME(Geometry, isEmpty, NULL, 0)
+++    PHP_ME(Geometry, equals, arginfo_Geometry_equals, 0)
+++    PHP_ME(Geometry, equalsExact, arginfo_Geometry_equalsExact, 0)
+++    PHP_ME(Geometry, isEmpty, arginfo_Geometry_isEmpty, 0)
++ 
++ #   ifdef HAVE_GEOS_IS_VALID_DETAIL
++-    PHP_ME(Geometry, checkValidity, NULL, 0)
+++    PHP_ME(Geometry, checkValidity, arginfo_Geometry_checkValidity, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, isSimple, NULL, 0)
++-    PHP_ME(Geometry, isRing, NULL, 0)
++-    PHP_ME(Geometry, hasZ, NULL, 0)
+++    PHP_ME(Geometry, isSimple, arginfo_Geometry_isSimple, 0)
+++    PHP_ME(Geometry, isRing, arginfo_Geometry_isRing, 0)
+++    PHP_ME(Geometry, hasZ, arginfo_Geometry_hasZ, 0)
++ 
++ #   ifdef HAVE_GEOS_IS_CLOSED
++-    PHP_ME(Geometry, isClosed, NULL, 0)
+++    PHP_ME(Geometry, isClosed, arginfo_Geometry_isClosed, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, typeName, NULL, 0)
++-    PHP_ME(Geometry, typeId, NULL, 0)
++-    PHP_ME(Geometry, getSRID, NULL, 0)
++-    PHP_ME(Geometry, setSRID, NULL, 0)
++-    PHP_ME(Geometry, numGeometries, NULL, 0)
++-    PHP_ME(Geometry, geometryN, NULL, 0)
++-    PHP_ME(Geometry, numInteriorRings, NULL, 0)
+++    PHP_ME(Geometry, typeName, arginfo_Geometry_typeName, 0)
+++    PHP_ME(Geometry, typeId, arginfo_Geometry_typeId, 0)
+++    PHP_ME(Geometry, getSRID, arginfo_Geometry_getSRID, 0)
+++    PHP_ME(Geometry, setSRID, arginfo_Geometry_setSRID, 0)
+++    PHP_ME(Geometry, numGeometries, arginfo_Geometry_numGeometries, 0)
+++    PHP_ME(Geometry, geometryN, arginfo_Geometry_geometryN, 0)
+++    PHP_ME(Geometry, numInteriorRings, arginfo_Geometry_numInteriorRings, 0)
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_NUM_POINTS
++-    PHP_ME(Geometry, numPoints, NULL, 0)
+++    PHP_ME(Geometry, numPoints, arginfo_Geometry_numPoints, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_X
++-    PHP_ME(Geometry, getX, NULL, 0)
+++    PHP_ME(Geometry, getX, arginfo_Geometry_getX, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_Y
++-    PHP_ME(Geometry, getY, NULL, 0)
+++    PHP_ME(Geometry, getY, arginfo_Geometry_getY, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, interiorRingN, NULL, 0)
++-    PHP_ME(Geometry, exteriorRing, NULL, 0)
++-    PHP_ME(Geometry, numCoordinates, NULL, 0)
++-    PHP_ME(Geometry, dimension, NULL, 0)
+++    PHP_ME(Geometry, interiorRingN, arginfo_Geometry_interiorRingN, 0)
+++    PHP_ME(Geometry, exteriorRing, arginfo_Geometry_exteriorRing, 0)
+++    PHP_ME(Geometry, numCoordinates, arginfo_Geometry_numCoordinates, 0)
+++    PHP_ME(Geometry, dimension, arginfo_Geometry_dimension, 0)
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_COORDINATE_DIMENSION
++-    PHP_ME(Geometry, coordinateDimension, NULL, 0)
+++    PHP_ME(Geometry, coordinateDimension, arginfo_Geometry_coordinateDimension, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_POINT_N
++-    PHP_ME(Geometry, pointN, NULL, 0)
+++    PHP_ME(Geometry, pointN, arginfo_Geometry_pointN, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_START_POINT
++-    PHP_ME(Geometry, startPoint, NULL, 0)
+++    PHP_ME(Geometry, startPoint, arginfo_Geometry_startPoint, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_GEOM_GET_END_POINT
++-    PHP_ME(Geometry, endPoint, NULL, 0)
+++    PHP_ME(Geometry, endPoint, arginfo_Geometry_endPoint, 0)
++ #   endif
++ 
++-    PHP_ME(Geometry, area, NULL, 0)
++-    PHP_ME(Geometry, length, NULL, 0)
++-    PHP_ME(Geometry, distance, NULL, 0)
++-    PHP_ME(Geometry, hausdorffDistance, NULL, 0)
+++    PHP_ME(Geometry, area, arginfo_Geometry_area, 0)
+++    PHP_ME(Geometry, length, arginfo_Geometry_length, 0)
+++    PHP_ME(Geometry, distance, arginfo_Geometry_distance, 0)
+++    PHP_ME(Geometry, hausdorffDistance, arginfo_Geometry_hausdorffDistance, 0)
++ 
++ #   if HAVE_GEOS_SNAP
++-    PHP_ME(Geometry, snapTo, NULL, 0)
+++    PHP_ME(Geometry, snapTo, arginfo_Geometry_snapTo, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_NODE
++-    PHP_ME(Geometry, node, NULL, 0)
+++    PHP_ME(Geometry, node, arginfo_Geometry_node, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_DELAUNAY_TRIANGULATION
++-    PHP_ME(Geometry, delaunayTriangulation, NULL, 0)
+++    PHP_ME(Geometry, delaunayTriangulation, arginfo_Geometry_delaunayTriangulation, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_VORONOI_DIAGRAM
++-    PHP_ME(Geometry, voronoiDiagram, NULL, 0)
+++    PHP_ME(Geometry, voronoiDiagram, arginfo_Geometry_voronoiDiagram, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_CLIP_BY_RECT
++-    PHP_ME(Geometry, clipByRect, NULL, 0)
+++    PHP_ME(Geometry, clipByRect, arginfo_Geometry_clipByRect, 0)
++ #   endif
++ 
++     {NULL, NULL, NULL}
++@@ -2347,8 +2353,8 @@ PHP_METHOD(WKTReader, __construct);
++ PHP_METHOD(WKTReader, read);
++ 
++ static zend_function_entry WKTReader_methods[] = {
++-    PHP_ME(WKTReader, __construct, NULL, 0)
++-    PHP_ME(WKTReader, read, NULL, 0)
+++    PHP_ME(WKTReader, __construct, arginfo_WKTReader_construct, 0)
+++    PHP_ME(WKTReader, read, arginfo_WKTReader_read, 0)
++     {NULL, NULL, NULL}
++ };
++ 
++@@ -2457,27 +2463,27 @@ PHP_METHOD(WKTWriter, setOld3D);
++ #endif
++ 
++ static zend_function_entry WKTWriter_methods[] = {
++-    PHP_ME(WKTWriter, __construct, NULL, 0)
++-    PHP_ME(WKTWriter, write, NULL, 0)
+++    PHP_ME(WKTWriter, __construct, arginfo_WKTWriter_construct, 0)
+++    PHP_ME(WKTWriter, write, arginfo_WKTWriter_write, 0)
++ 
++ #   ifdef HAVE_GEOS_WKT_WRITER_SET_TRIM
++-    PHP_ME(WKTWriter, setTrim, NULL, 0)
+++    PHP_ME(WKTWriter, setTrim, arginfo_WKTWriter_setTrim, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_WKT_WRITER_SET_ROUNDING_PRECISION
++-    PHP_ME(WKTWriter, setRoundingPrecision, NULL, 0)
+++    PHP_ME(WKTWriter, setRoundingPrecision, arginfo_WKTWriter_setRoundingPrecision, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_WKT_WRITER_SET_OUTPUT_DIMENSION
++-    PHP_ME(WKTWriter, setOutputDimension, NULL, 0)
+++    PHP_ME(WKTWriter, setOutputDimension, arginfo_WKTWriter_setOutputDimension, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_WKT_WRITER_GET_OUTPUT_DIMENSION
++-    PHP_ME(WKTWriter, getOutputDimension, NULL, 0)
+++    PHP_ME(WKTWriter, getOutputDimension, arginfo_WKTWriter_getOutputDimension, 0)
++ #   endif
++ 
++ #   ifdef HAVE_GEOS_WKT_WRITER_SET_OLD_3D
++-    PHP_ME(WKTWriter, setOld3D, NULL, 0)
+++    PHP_ME(WKTWriter, setOld3D, arginfo_WKTWriter_setOld3D, 0)
++ #   endif
++ 
++     {NULL, NULL, NULL}
++@@ -2665,15 +2671,15 @@ PHP_METHOD(WKBWriter, write);
++ PHP_METHOD(WKBWriter, writeHEX);
++ 
++ static zend_function_entry WKBWriter_methods[] = {
++-    PHP_ME(WKBWriter, __construct, NULL, 0)
++-    PHP_ME(WKBWriter, getOutputDimension, NULL, 0)
++-    PHP_ME(WKBWriter, setOutputDimension, NULL, 0)
++-    PHP_ME(WKBWriter, getByteOrder, NULL, 0)
++-    PHP_ME(WKBWriter, setByteOrder, NULL, 0)
++-    PHP_ME(WKBWriter, getIncludeSRID, NULL, 0)
++-    PHP_ME(WKBWriter, setIncludeSRID, NULL, 0)
++-    PHP_ME(WKBWriter, write, NULL, 0)
++-    PHP_ME(WKBWriter, writeHEX, NULL, 0)
+++    PHP_ME(WKBWriter, __construct, arginfo_WKBWriter_construct, 0)
+++    PHP_ME(WKBWriter, getOutputDimension, arginfo_WKBWriter_getOutputDimension, 0)
+++    PHP_ME(WKBWriter, setOutputDimension, arginfo_WKBWriter_setOutputDimension, 0)
+++    PHP_ME(WKBWriter, getByteOrder, arginfo_WKBWriter_getByteOrder, 0)
+++    PHP_ME(WKBWriter, setByteOrder, arginfo_WKBWriter_setByteOrder, 0)
+++    PHP_ME(WKBWriter, getIncludeSRID, arginfo_WKBWriter_getIncludeSRID, 0)
+++    PHP_ME(WKBWriter, setIncludeSRID, arginfo_WKBWriter_setIncludeSRID, 0)
+++    PHP_ME(WKBWriter, write, arginfo_WKBWriter_write, 0)
+++    PHP_ME(WKBWriter, writeHEX, arginfo_WKBWriter_writeHEX, 0)
++     {NULL, NULL, NULL}
++ };
++ 
++@@ -2904,9 +2910,9 @@ PHP_METHOD(WKBReader, read);
++ PHP_METHOD(WKBReader, readHEX);
++ 
++ static zend_function_entry WKBReader_methods[] = {
++-    PHP_ME(WKBReader, __construct, NULL, 0)
++-    PHP_ME(WKBReader, read, NULL, 0)
++-    PHP_ME(WKBReader, readHEX, NULL, 0)
+++    PHP_ME(WKBReader, __construct, arginfo_WKBReader_construct, 0)
+++    PHP_ME(WKBReader, read, arginfo_WKBReader_read, 0)
+++    PHP_ME(WKBReader, readHEX, arginfo_WKBReader_readHEX, 0)
++     {NULL, NULL, NULL}
++ };
++ 
++--- a/php_geos.h
+++++ b/php_geos.h
++@@ -48,6 +48,15 @@ extern zend_module_entry geos_module_ent
++ #define GEOS_G(v) (geos_globals.v)
++ #endif
++ 
+++/* for PHP 8 */
+++#ifndef TSRMLS_D
+++#define TSRMLS_D void
+++#define TSRMLS_DC
+++#define TSRMLS_C
+++#define TSRMLS_CC
+++#define TSRMLS_FETCH()
+++#endif
+++
++ ZEND_BEGIN_MODULE_GLOBALS(geos)
++ GEOSContextHandle_t handle;
++ ZEND_END_MODULE_GLOBALS(geos)
++--- a/tests/002_WKTWriter.phpt
+++++ b/tests/002_WKTWriter.phpt
++@@ -25,6 +25,8 @@ class WKTWriterTest extends GEOSTest
++             $this->assertTrue(FALSE); # this is just to fail if we get here
++         } catch (Exception $e) {
++             $this->assertContains('expects parameter 1', $e->getMessage());
+++        } catch (Error $e) {
+++            $this->assertContains('Argument #1', $e->getMessage());
++         }
++ 
++         $g = $reader->read('POINT(6 7)');
++--- a/tests/003_WKTReader.phpt
+++++ b/tests/003_WKTReader.phpt
++@@ -99,6 +99,8 @@ class WKTReaderTest extends GEOSTest
++         } catch (Exception $e) {
++             $this->assertContains('expects exactly 1 parameter',
++                                   $e->getMessage());
+++        } catch (Error $e) {
+++            $this->assertContains('expects exactly 1 parameter', $e->getMessage());
++         }
++     }
++ }
++--- a/tests/004_WKBWriter.phpt
+++++ b/tests/004_WKBWriter.phpt
++@@ -140,6 +140,8 @@ class WKBWriterTest extends GEOSTest
++             $this->assertTrue(false);
++         } catch (ErrorException $e) {
++             $this->assertContains('expects parameter 1 to be object, int', $e->getMessage());
+++        } catch (Error $e) {
+++            $this->assertContains('Argument #1', $e->getMessage());
++         }
++     }
++ 
++@@ -152,7 +154,9 @@ class WKBWriterTest extends GEOSTest
++             $this->assertTrue(false);
++         } catch (ErrorException $e) {
++             $this->assertContains('expects parameter 1 to be object, int', $e->getMessage());
++-        }
+++        } catch (Error $e) {
+++            $this->assertContains('Argument #1', $e->getMessage());
+++	    }
++     }
++ }
++ 
+diff --git a/debian/patches/0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch b/debian/patches/0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch
+new file mode 100644
+index 0000000..360b308
+--- /dev/null
++++ b/debian/patches/0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch
+@@ -0,0 +1,114 @@
++Description: fix all zend_parse_parameters call to use zend_long
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/26
++
++--- a/geos.c
+++++ b/geos.c
++@@ -78,6 +78,7 @@ PHP_FUNCTION(GEOSRelateMatch);
++ # define GEOS_PHP_ADD_ASSOC_ZVAL(a,k,v) add_assoc_zval((a), (k), (v))
++ # define GEOS_PHP_HASH_GET_CUR_KEY(s,k,i) zend_hash_get_current_key((s), (k), (i), 0)
++ # define zend_string char
+++# define zend_long long
++ # define ZSTR_VAL(x) (x)
++ # define GEOS_PHP_HASH_GET_CUR_DATA(h,d) zend_hash_get_current_data((h),(void**)&(d))
++ # define GEOS_PHP_ZVAL zval **
++@@ -1281,7 +1282,7 @@ PHP_METHOD(Geometry, relateBoundaryNodeR
++     GEOSGeometry *other;
++     zval *zobj;
++     char* pat;
++-    long int bnr = GEOSRELATE_BNR_OGC;
+++    zend_long bnr = GEOSRELATE_BNR_OGC;
++     char* retStr;
++ 
++     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++@@ -1342,7 +1343,7 @@ PHP_METHOD(Geometry, setPrecision)
++ {
++     GEOSGeometry *this;
++     double gridSize;
++-    long int flags = 0;
+++    zend_long flags = 0;
++     GEOSGeometry *ret;
++ 
++     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++@@ -1756,7 +1757,7 @@ PHP_METHOD(Geometry, checkValidity)
++     zend_bool retBool;
++     char *reasonVal = NULL;
++     zval *locationVal = NULL;
++-    long int flags = 0;
+++    zend_long flags = 0;
++ 
++     this = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++ 
++@@ -1929,7 +1930,7 @@ PHP_METHOD(Geometry, getSRID)
++ PHP_METHOD(Geometry, setSRID)
++ {
++     GEOSGeometry *geom;
++-    long int srid;
+++    zend_long srid;
++ 
++     geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++ 
++@@ -1965,7 +1966,7 @@ PHP_METHOD(Geometry, geometryN)
++     GEOSGeometry *geom;
++     const GEOSGeometry *c;
++     GEOSGeometry *cc;
++-    long int num;
+++    zend_long num;
++ 
++     geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++ 
++@@ -2064,7 +2065,7 @@ PHP_METHOD(Geometry, interiorRingN)
++     GEOSGeometry *geom;
++     const GEOSGeometry *c;
++     GEOSGeometry *cc;
++-    long int num;
+++    zend_long num;
++ 
++     geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++ 
++@@ -2162,7 +2163,7 @@ PHP_METHOD(Geometry, pointN)
++ {
++     GEOSGeometry *geom;
++     GEOSGeometry *c;
++-    long int num;
+++    zend_long num;
++ 
++     geom = (GEOSGeometry*)getRelay(getThis(), Geometry_ce_ptr);
++ 
++@@ -2586,7 +2587,7 @@ PHP_METHOD(WKTWriter, setTrim)
++ PHP_METHOD(WKTWriter, setRoundingPrecision)
++ {
++     GEOSWKTWriter *writer;
++-    long int prec;
+++    zend_long prec;
++ 
++     writer = (GEOSWKTWriter*)getRelay(getThis(), WKTWriter_ce_ptr);
++ 
++@@ -2607,7 +2608,7 @@ PHP_METHOD(WKTWriter, setRoundingPrecisi
++ PHP_METHOD(WKTWriter, setOutputDimension)
++ {
++     GEOSWKTWriter *writer;
++-    long int dim;
+++    zend_long dim;
++ 
++     writer = (GEOSWKTWriter*)getRelay(getThis(), WKTWriter_ce_ptr);
++ 
++@@ -2752,7 +2753,7 @@ PHP_METHOD(WKBWriter, getOutputDimension
++ PHP_METHOD(WKBWriter, setOutputDimension)
++ {
++     GEOSWKBWriter *writer;
++-    long int dim;
+++    zend_long dim;
++ 
++     writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
++ 
++@@ -2851,7 +2852,7 @@ PHP_METHOD(WKBWriter, getByteOrder)
++ PHP_METHOD(WKBWriter, setByteOrder)
++ {
++     GEOSWKBWriter *writer;
++-    long int dim;
+++    zend_long dim;
++ 
++     writer = (GEOSWKBWriter*)getRelay(getThis(), WKBWriter_ce_ptr);
++ 
+diff --git a/debian/patches/0005-fix-for-8.0.0RC1.patch b/debian/patches/0005-fix-for-8.0.0RC1.patch
+new file mode 100644
+index 0000000..f0b3dd8
+--- /dev/null
++++ b/debian/patches/0005-fix-for-8.0.0RC1.patch
+@@ -0,0 +1,16 @@
++Description: fix for 8.0.0RC1
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0005-fix-for-8.0.0RC1.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/26
++
++--- a/tests/003_WKTReader.phpt
+++++ b/tests/003_WKTReader.phpt
++@@ -100,7 +100,7 @@ class WKTReaderTest extends GEOSTest
++             $this->assertContains('expects exactly 1 parameter',
++                                   $e->getMessage());
++         } catch (Error $e) {
++-            $this->assertContains('expects exactly 1 parameter', $e->getMessage());
+++            $this->assertContains('expects exactly 1', $e->getMessage());
++         }
++     }
++ }
+diff --git a/debian/patches/0006-fix-__toString-with-8.2.patch b/debian/patches/0006-fix-__toString-with-8.2.patch
+new file mode 100644
+index 0000000..ce361c9
+--- /dev/null
++++ b/debian/patches/0006-fix-__toString-with-8.2.patch
+@@ -0,0 +1,20 @@
++Description: fix __toString with 8.2
++Author: Remi Collet <remi@remirepo.net>
++Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/plain/0006-fix-__toString-with-8.2.patch
++Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/26
++
++--- a/arginfo.h
+++++ b/arginfo.h
++@@ -36,7 +36,12 @@ ZEND_END_ARG_INFO()
++ 
++ #define arginfo_Geometry_construct       arginfo_void
++ 
+++#if PHP_VERSION_ID >= 80200
+++ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_Geometry_toString, 0, 0, IS_STRING, 0)
+++ZEND_END_ARG_INFO();
+++#else
++ #define arginfo_Geometry_toString        arginfo_void
+++#endif
++ 
++ ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_project, 0, 0, 1)
++     ZEND_ARG_INFO(0, geom)
+diff --git a/debian/patches/series b/debian/patches/series
+new file mode 100644
+index 0000000..a5118a0
+--- /dev/null
++++ b/debian/patches/series
+@@ -0,0 +1,7 @@
++0001-fix-test-for-7.3-int-vs-integer.patch
++0002-fix-error-message-with-php-7-Wformat-warnings-raised.patch
++0003-add-all-arginfo-and-fix-build-with-PHP-8.patch
++0004-fix-all-zend_parse_parameters-call-to-use-zend_long.patch
++0005-fix-for-8.0.0RC1.patch
++0006-fix-__toString-with-8.2.patch
++use-zend_ce_exception-php8.5.patch
+diff --git a/debian/patches/use-zend_ce_exception-php8.5.patch b/debian/patches/use-zend_ce_exception-php8.5.patch
+new file mode 100644
+index 0000000..246012b
+--- /dev/null
++++ b/debian/patches/use-zend_ce_exception-php8.5.patch
+@@ -0,0 +1,22 @@
++Description: [PATCH] use zend_ce_exception instead of zend_exception_get_default() for 8.5
++Author: Remi Collet <remi@remirepo.net>
++Origin: upstream, https://github.com/nono303/php-geos/commit/cd8fed75d9b0893ce9ac97672b747eddf991ea57
++Last-Update: 2026-01-30
++---
++This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
++diff --git a/geos.c b/geos.c
++index ad2dce2..8f4bdd3 100644
++--- a/geos.c
+++++ b/geos.c
++@@ -150,7 +150,11 @@ static void errorHandler(const char *fmt, ...)
++     va_end(args);
++ 
++     /* TODO: use a GEOSException ? */
+++#if PHP_VERSION_ID < 80000
++     zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+++#else
+++    zend_throw_exception_ex(zend_ce_exception,
+++#endif
++         1 TSRMLS_CC, "%s", message);
++ 
++ }
+diff --git a/debian/php-geos.php b/debian/php-geos.php
+new file mode 100644
+index 0000000..01ed29e
+--- /dev/null
++++ b/debian/php-geos.php
+@@ -0,0 +1 @@
++mod debian/geos.ini
+diff --git a/debian/php-geos.postinst b/debian/php-geos.postinst
+new file mode 100644
+index 0000000..cf59ce3
+--- /dev/null
++++ b/debian/php-geos.postinst
+@@ -0,0 +1,14 @@
++#!/bin/sh
++
++set -e
++
++# Source debconf library.
++. /usr/share/debconf/confmodule
++
++#DEBHELPER#
++
++if [ "$1" = "configure" ]; then
++	phpenmod geos
++fi
++
++exit 0
+diff --git a/debian/php-geos.prerm b/debian/php-geos.prerm
+new file mode 100644
+index 0000000..07953ac
+--- /dev/null
++++ b/debian/php-geos.prerm
+@@ -0,0 +1,11 @@
++#!/bin/sh
++
++set -e
++
++#DEBHELPER#
++
++if [ "$1" = "remove" ]; then
++	phpdismod geos
++fi
++
++exit 0
+diff --git a/debian/rules b/debian/rules
+new file mode 100755
+index 0000000..f9f0b8f
+--- /dev/null
++++ b/debian/rules
+@@ -0,0 +1,21 @@
++#!/usr/bin/make -f
++# -*- makefile -*-
++
++# Uncomment this to turn on verbose mode.
++#export DH_VERBOSE=1
++
++# Enable hardening build flags
++export DEB_BUILD_MAINT_OPTIONS=hardening=+all
++
++%:
++	dh $@ --with php
++
++override_dh_autoreconf:
++	dh_autoreconf ./autogen.sh
++
++override_dh_auto_test:
++	REPORT_EXIT_STATUS=1 NO_INTERACTION=1 TESTS="-q --show-diff" dh_auto_test || echo "Ignoring test failures"
++
++override_dh_auto_install:
++	# phpize uses INSTALL_ROOT instead of DESTDIR
++	$(MAKE) install INSTALL_ROOT=$(CURDIR)/debian/php-geos
+diff --git a/debian/source/format b/debian/source/format
+new file mode 100644
+index 0000000..163aaf8
+--- /dev/null
++++ b/debian/source/format
+@@ -0,0 +1 @@
++3.0 (quilt)
+diff --git a/debian/source/lintian-overrides b/debian/source/lintian-overrides
+new file mode 100644
+index 0000000..e772bc3
+--- /dev/null
++++ b/debian/source/lintian-overrides
+@@ -0,0 +1,3 @@
++# php-geos is a PECL extension not a PEAR package.
++pear-package-without-pkg-php-tools-builddep
++
+diff --git a/debian/upstream/metadata b/debian/upstream/metadata
+new file mode 100644
+index 0000000..6ac085d
+--- /dev/null
++++ b/debian/upstream/metadata
+@@ -0,0 +1,5 @@
++---
++Bug-Database: https://git.osgeo.org/gitea/geos/php-geos/issues
++#Bug-Submit: https://git.osgeo.org/gitea/geos/php-geos/issues/new
++Repository: https://git.osgeo.org/gitea/geos/php-geos.git
++Repository-Browse: https://git.osgeo.org/gitea/geos/php-geos
+diff --git a/debian/watch b/debian/watch
+new file mode 100644
+index 0000000..7291112
+--- /dev/null
++++ b/debian/watch
+@@ -0,0 +1,7 @@
++version=4
++opts=\
++dversionmangle=s/\+(debian|dfsg|ds|deb)\d*$//,\
++uversionmangle=s/(\d)[_\.\-\+]?((RC|rc|pre|dev|beta|alpha)\d*)$/$1~$2/;s/RC/rc/,\
++filenamemangle=s/(?:.*?)?(?:rel|v|php-geos)?[\-\_]?(\d\S+)\.(tgz|tbz|txz|(?:tar\.(?:gz|bz2|xz)))/php-geos-$1.$2/ \
++https://git.osgeo.org/gitea/geos/php-geos/tags \
++(?:.*?/)?(?:rel|v|php-geos)?[\-\_]?(\d\S+)\.(?:tgz|tbz|txz|(?:tar\.(?:gz|bz2|xz)))
+-- 
+2.34.1
+

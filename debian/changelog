@@ -1,3 +1,62 @@
+php-geos (1.1.0+git20260426-1~jammy1) jammy; urgency=medium
+
+  * Major upstream extension: fork at github.com/avdmerwe/php-geos targeting
+    libgeos 3.14.x. Minimum required GEOS bumped to 3.11.0; all
+    HAVE_GEOS_* feature-detection gates dropped from config.m4, geos.c,
+    arginfo.h.
+  * New class GEOSCoordSeq (Item 2): foundational sequence type with
+    full Z/M support, copyFromArrays/copyToArrays, lifecycle hand-off
+    semantics for use as a constructor argument.
+  * New methods on GEOSGeometry:
+    - MakeValid family with linework + structure modes (Item 3).
+    - Concave hulls: concaveHull, concaveHullByLength,
+      concaveHullOfPolygons, polygonHullSimplify (Item 4).
+    - Precision-grid overlays: optional gridSize on intersection,
+      difference, symDifference, union (Item 5).
+    - WKB flavor toggle (EXTENDED / ISO) and fix-structure on
+      WKT/WKB readers (Item 7).
+    - Hull and metric extras: minimumBoundingCircle,
+      minimumRotatedRectangle, minimumWidth, minimumClearance,
+      minimumClearanceLine, maximumInscribedCircle, largestEmptyCircle
+      (Item 8).
+    - Distance extras: distanceWithin, distanceIndexed, nearestPoints,
+      frechetDistance(+Densify), hausdorffDistanceDensify (Item 9).
+    - Linear-referencing extras: lineSubstring, lineMergeDirected
+      (Item 10).
+    - Construction utilities: reverse, densify, removeRepeatedPoints,
+      orientPolygons, equalsIdentical, getX/Y min/max, getExtent,
+      buildArea, plus standalone GEOSPolygonizeValid,
+      GEOSPolygonizeCutEdges, GEOSBuildArea, GEOSDisjointSubsetUnion
+      (Item 11).
+    - Curved-geometry constructors: createCircularString,
+      createCompoundCurve, createCurvePolygon, plus type-id constants
+      (Item 12).
+    - Coverage processing: coverageUnion, coverageIsValid,
+      coverageSimplifyVW, coverageClean (Item 13).
+    - Clustering: clusterDBSCAN, clusterByDistance,
+      clusterByIntersection returning new GEOSClusterResult (Item 14).
+    - Constrained Delaunay via $constrained option (Item 15).
+    - Geometry construction factories: createPoint(+FromXY+Empty),
+      createLineString, createLinearRing, createPolygon,
+      createCollection, createRectangle (Item 16).
+    - Coordinate-transform callbacks: transformXY, transformXYZ
+      (Item 19).
+    - P2 fillers: hilbertCode, gridIntersectionFractions,
+      orientationIndex, segmentIntersection (Item 20).
+  * New classes:
+    - GEOSGeoJSONReader / GEOSGeoJSONWriter (Item 6).
+    - GEOSClusterResult (Item 14).
+    - GEOSSTRtree spatial index with callback iteration, payload
+      box-allocation, sticky-error exception propagation (Item 17).
+    - GEOSPreparedGeometry with full predicate set, distance, and
+      nearestPoints (Item 18).
+  * Backwards compatible with 1.0.0 callers; no removed or renamed
+    methods.
+  * 25 .phpt test files (000-005 baseline + 006-060 feature suites),
+    all green against libgeos 3.14.1.
+
+ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 17:30:00 +0200
+
 php-geos (1.0.0+git20240129-2~jammy1) jammy; urgency=medium
 
   * Update tests/*.phpt assertions for libgeos 3.14.1 default behavioural

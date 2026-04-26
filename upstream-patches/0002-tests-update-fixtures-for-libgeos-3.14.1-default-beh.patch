@@ -1,0 +1,557 @@
+From 4649337cc64b71470b2f26cca66bed6cd33762b7 Mon Sep 17 00:00:00 2001
+From: Abraham van der Merwe <abz@frogfoot.com>
+Date: Sun, 26 Apr 2026 16:08:55 +0200
+Subject: [PATCH 2/8] tests: update fixtures for libgeos 3.14.1 default
+ behaviour
+
+GEOS 3.14.1 introduced several backwards-compatible default-behaviour
+changes that surface in our 1.0.0-era test fixtures. Updates each .phpt
+to expect the new defaults and outputs:
+
+- WKT writer: canonicalises -0 -> 0; default trim is now TRUE;
+  setRoundingPrecision(0) yields trimmed output; setOutputDimension
+  accepts 4 (XYZM); error message text broadened.
+- WKB writer/reader: getOutputDimension default is 4; accepts 4 as
+  valid input; error message broadened.
+- Geometry: empty intersection returns input-type EMPTY rather than
+  GEOMETRYCOLLECTION EMPTY for POINT-POINT and similar same-type cases;
+  polygon ring start vertex normalised to lex-smallest; collection
+  member ordering changed; mitre-join buffer corner clamping shifted;
+  offsetCurve right-side reverses orientation and densifies
+  interpolation; MULTIPOINT WKT format now 'MULTIPOINT ((x y), ...)';
+  argument-type exception messages broadened ('Polygon' -> 'Surface',
+  'LineString' -> 'Curve' / 'SimpleCurve' depending on context).
+- Three pre-existing WKT parse-typo testcases that GEOS 3.10's lenient
+  parser silently accepted: extra ')' in GEOMETRYCOLLECTION /
+  MULTIPOLYGON literals. Fixed.
+
+All 6 .phpt tests now pass against libgeos 3.14.1.
+---
+ debian/changelog         | 24 +++++++++++
+ tests/001_Geometry.phpt  | 86 ++++++++++++++++++++--------------------
+ tests/002_WKTWriter.phpt | 24 ++++++-----
+ tests/004_WKBWriter.phpt | 14 ++++---
+ tests/005_WKBReader.phpt |  6 +--
+ 5 files changed, 93 insertions(+), 61 deletions(-)
+
+diff --git a/debian/changelog b/debian/changelog
+index 9029f8e..7c4061b 100644
+--- a/debian/changelog
++++ b/debian/changelog
+@@ -1,3 +1,27 @@
++php-geos (1.0.0+git20240129-2~jammy1) jammy; urgency=medium
++
++  * Update tests/*.phpt assertions for libgeos 3.14.1 default behavioural
++    changes. Six tests (000-005) were previously passing 5/6 against
++    libgeos 3.10.2 but failing 4/6 against 3.14.1; they now pass 6/6:
++    - 001 Geometry: WKT writer canonicalises -0 -> 0; empty intersection
++      returns input-type EMPTY (POINT EMPTY rather than GEOMETRYCOLLECTION
++      EMPTY for POINT-POINT etc); polygon ring start vertex normalised to
++      lex-smallest; collection member ordering changed; mitre-join
++      buffer corner clamping shifted; offsetCurve right-side reversed
++      orientation + denser interpolation; MULTIPOINT WKT format now
++      `MULTIPOINT ((x y), ...)`; argument-type exception messages broadened
++      ("Polygon" -> "Surface", "LineString" -> "Curve" / "SimpleCurve").
++      Fixed three pre-existing WKT parse-typo testcases that 3.10's lenient
++      parser silently accepted (extra `)` in GEOMETRYCOLLECTION literals).
++    - 002 WKTWriter: default trim is now TRUE; setRoundingPrecision(0)
++      yields trimmed output; setOutputDimension accepts 4 (XYZM); error
++      message text broadened to "must be 2, 3, or 4".
++    - 004 WKBWriter: getOutputDimension default is now 4 (XYZM); accepts
++      4 as valid; error message broadened.
++    - 005 WKBReader: round-trip WKT data updated for new MULTIPOINT format.
++
++ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 16:00:00 +0200
++
+ php-geos (1.0.0+git20240129-1~jammy1) jammy; urgency=medium
+ 
+   * Baseline rebuild from gitea HEAD (dfe1ab1, 2024-01-29):
+diff --git a/tests/001_Geometry.phpt b/tests/001_Geometry.phpt
+index 5715348..a3c6ebb 100644
+--- a/tests/001_Geometry.phpt
++++ b/tests/001_Geometry.phpt
+@@ -144,11 +144,11 @@ class GeometryTest extends GEOSTest
+         $this->assertEquals('POLYGON EMPTY', $writer->write($b));
+ 
+         $b = $g->buffer(10);
+-        $this->assertEquals('POLYGON ((10 0, 10 -2, 9 -4, 8 -6, 7 -7, 6 -8, 4 -9, 2 -10, 0 -10, -2 -10, -4 -9, -6 -8, -7 -7, -8 -6, -9 -4, -10 -2, -10 -0, -10 2, -9 4, -8 6, -7 7, -6 8, -4 9, -2 10, -0 10, 2 10, 4 9, 6 8, 7 7, 8 6, 9 4, 10 2, 10 0))', $writer->write($b));
++        $this->assertEquals('POLYGON ((10 0, 10 -2, 9 -4, 8 -6, 7 -7, 6 -8, 4 -9, 2 -10, 0 -10, -2 -10, -4 -9, -6 -8, -7 -7, -8 -6, -9 -4, -10 -2, -10 0, -10 2, -9 4, -8 6, -7 7, -6 8, -4 9, -2 10, 0 10, 2 10, 4 9, 6 8, 7 7, 8 6, 9 4, 10 2, 10 0))', $writer->write($b));
+ 
+         # One segment per quadrant
+         $b = $g->buffer(10, array('quad_segs' => 1));
+-        $this->assertEquals('POLYGON ((10 0, 0 -10, -10 -0, -0 10, 10 0))', $writer->write($b));
++        $this->assertEquals('POLYGON ((10 0, 0 -10, -10 0, 0 10, 10 0))', $writer->write($b));
+ 
+         /* End cap styles */
+ 
+@@ -199,7 +199,7 @@ class GeometryTest extends GEOSTest
+             'join' => GEOSBUF_JOIN_MITRE,
+             'mitre_limit' => 1.0
+         ));
+-        $this->assertEquals('POLYGON ((90 10, 90 100, 93 107, 100 110, 107 107, 110 100, 109 -5, 105 -9, 0 -10, -7 -7, -10 0, -7 7, 0 10, 90 10))', $writer->write($b));
++        $this->assertEquals('POLYGON ((90 10, 90 100, 93 107, 100 110, 107 107, 110 100, 110 -4, 104 -10, 0 -10, -7 -7, -10 0, -7 7, 0 10, 90 10))', $writer->write($b));
+ 
+         /* Check that elements of the passed style array are not
+          * type-converted (buffer op will need to type-convert
+@@ -265,7 +265,7 @@ class GeometryTest extends GEOSTest
+             'quad_segs' => 2,
+             'join' => GEOSBUF_JOIN_ROUND
+         ));
+-        $this->assertEquals('LINESTRING (110 100, 110 0, 107 -7, 100 -10, 0 -10)', $writer->write($b));
++        $this->assertEquals('LINESTRING (0 -10, 100 -10, 102 -10, 104 -9, 106 -8, 107 -7, 108 -6, 109 -4, 110 -2, 110 0, 110 100)', $writer->write($b));
+ 
+         /* left, bevel join */
+         $b = $g->offsetCurve(10, array(
+@@ -279,7 +279,7 @@ class GeometryTest extends GEOSTest
+             'quad_segs' => 2,
+             'join' => GEOSBUF_JOIN_BEVEL
+         ));
+-        $this->assertEquals('LINESTRING (110 100, 110 0, 100 -10, 0 -10)', $writer->write($b));
++        $this->assertEquals('LINESTRING (0 -10, 100 -10, 110 0, 110 100)', $writer->write($b));
+ 
+           /* left, mitre join */
+         $b = $g->offsetCurve(10, array(
+@@ -293,7 +293,7 @@ class GeometryTest extends GEOSTest
+             'quad_segs' => 2,
+             'join' => GEOSBUF_JOIN_MITRE
+         ));
+-        $this->assertEquals('LINESTRING (110 100, 110 -10, 0 -10)', $writer->write($b));
++        $this->assertEquals('LINESTRING (0 -10, 110 -10, 110 100)', $writer->write($b));
+ 
+         /* right, mitre join limited */
+         $b = $g->offsetCurve(-10, array(
+@@ -301,7 +301,7 @@ class GeometryTest extends GEOSTest
+             'join' => GEOSBUF_JOIN_MITRE,
+             'mitre_limit' => 1.0
+         ));
+-        $this->assertEquals('LINESTRING (110 100, 109 -5, 105 -9, 0 -10)', $writer->write($b));
++        $this->assertEquals('LINESTRING (0 -10, 104 -10, 110 -4, 110 100)', $writer->write($b));
+     }
+ 
+     public function testGeometry_envelope()
+@@ -338,7 +338,7 @@ class GeometryTest extends GEOSTest
+         $this->assertEquals( 'POINT (0 0)', $writer->write($gi));
+         $g2 = $reader->read('POINT(1 0)');
+         $gi = $g->intersection($g2);
+-        $this->assertEquals( 'GEOMETRYCOLLECTION EMPTY', $writer->write($gi));
++        $this->assertEquals( 'POINT EMPTY', $writer->write($gi));
+ 
+         /* POINT - LINE */
+         $g = $reader->read('LINESTRING(0 0, 10 0)');
+@@ -347,7 +347,7 @@ class GeometryTest extends GEOSTest
+         $this->assertEquals( 'POINT (5 0)', $writer->write($gi));
+         $g2 = $reader->read('POINT(12 0)');
+         $gi = $g->intersection($g2);
+-        $this->assertEquals( 'GEOMETRYCOLLECTION EMPTY', $writer->write($gi));
++        $this->assertEquals( 'POINT EMPTY', $writer->write($gi));
+ 
+         /* LINE - LINE */
+         $g = $reader->read('LINESTRING(0 0, 10 0)');
+@@ -445,7 +445,7 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POINT(0 0)');
+         $g2 = $reader->read('POINT(0 0)');
+         $gi = $g->difference($g2);
+-        $this->assertEquals( 'GEOMETRYCOLLECTION EMPTY', $writer->write($gi));
++        $this->assertEquals( 'POINT EMPTY', $writer->write($gi));
+         $g2 = $reader->read('POINT(1 0)');
+         $gi = $g->difference($g2);
+         $this->assertEquals('POINT (0 0)', $writer->write($gi));
+@@ -460,7 +460,7 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POINT(5 0)');
+         $g2 = $reader->read('LINESTRING(0 0, 10 0)');
+         $gi = $g->difference($g2);
+-        $this->assertEquals('GEOMETRYCOLLECTION EMPTY', $writer->write($gi));
++        $this->assertEquals('POINT EMPTY', $writer->write($gi));
+         $g2 = $reader->read('LINESTRING(0 1, 10 1)');
+         $gi = $g->difference($g2);
+         $this->assertEquals( 'POINT (5 0)', $writer->write($gi));
+@@ -478,16 +478,16 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('LINESTRING(5 -10, 5 10)');
+         $gi = $g->difference($g2);
+-        $this->assertEquals('POLYGON ((5 0, 0 0, 0 10, 5 10, 10 10, 10 0, 5 0))', $writer->write($gi));
++        $this->assertEquals('POLYGON ((0 0, 0 10, 5 10, 10 10, 10 0, 5 0, 0 0))', $writer->write($gi));
+         $g2 = $reader->read('LINESTRING(10 0, 20 0)');
+         $gi = $g->difference($g2);
+-        $this->assertEquals('POLYGON ((10 0, 0 0, 0 10, 10 10, 10 0))', $writer->write($gi));
++        $this->assertEquals('POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0))', $writer->write($gi));
+ 
+         /* POLY - POLY */
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('POLYGON((5 -5, 5 5, 15 5, 15 -5, 5 -5))');
+         $gi = $g->difference($g2);
+-        $this->assertEquals('POLYGON ((5 0, 0 0, 0 10, 10 10, 10 5, 5 5, 5 0))', $writer->write($gi));
++        $this->assertEquals('POLYGON ((0 0, 0 10, 10 10, 10 5, 5 5, 5 0, 0 0))', $writer->write($gi));
+     }
+ 
+     public function testGeometry_symdifference()
+@@ -503,10 +503,10 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POINT(0 0)');
+         $g2 = $reader->read('POINT(0 0)');
+         $gi = $g->symDifference($g2);
+-        $this->assertEquals( 'GEOMETRYCOLLECTION EMPTY', $writer->write($gi));
++        $this->assertEquals( 'POINT EMPTY', $writer->write($gi));
+         $g2 = $reader->read('POINT(1 0)');
+         $gi = $g->symDifference($g2);
+-        $this->assertEquals( 'MULTIPOINT (0 0, 1 0)', $writer->write($gi));
++        $this->assertEquals( 'MULTIPOINT ((0 0), (1 0))', $writer->write($gi));
+ 
+         /* LINE - POINT */
+         $g = $reader->read('LINESTRING(0 0, 10 0)');
+@@ -536,16 +536,16 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('LINESTRING(5 -10, 5 10)');
+         $gi = $g->symDifference($g2);
+-        $this->assertEquals('GEOMETRYCOLLECTION (LINESTRING (5 -10, 5 0), POLYGON ((5 0, 0 0, 0 10, 5 10, 10 10, 10 0, 5 0)))', $writer->write($gi));
++        $this->assertEquals('GEOMETRYCOLLECTION (POLYGON ((0 0, 0 10, 5 10, 10 10, 10 0, 5 0, 0 0)), LINESTRING (5 -10, 5 0))', $writer->write($gi));
+         $g2 = $reader->read('LINESTRING(10 0, 20 0)');
+         $gi = $g->symDifference($g2);
+-        $this->assertEquals('GEOMETRYCOLLECTION (LINESTRING (10 0, 20 0), POLYGON ((10 0, 0 0, 0 10, 10 10, 10 0)))', $writer->write($gi));
++        $this->assertEquals('GEOMETRYCOLLECTION (POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0)), LINESTRING (10 0, 20 0))', $writer->write($gi));
+ 
+         /* POLY - POLY */
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('POLYGON((5 -5, 5 5, 15 5, 15 -5, 5 -5))');
+         $gi = $g->symDifference($g2);
+-        $this->assertEquals('MULTIPOLYGON (((5 0, 0 0, 0 10, 10 10, 10 5, 5 5, 5 0)), ((5 0, 10 0, 10 5, 15 5, 15 -5, 5 -5, 5 0)))', $writer->write($gi));
++        $this->assertEquals('MULTIPOLYGON (((0 0, 0 10, 10 10, 10 5, 5 5, 5 0, 0 0)), ((10 0, 10 5, 15 5, 15 -5, 5 -5, 5 0, 10 0)))', $writer->write($gi));
+     }
+ 
+     public function testGeometry_boundary()
+@@ -563,7 +563,7 @@ class GeometryTest extends GEOSTest
+ 
+         $g = $reader->read('LINESTRING(0 0, 10 10)');
+         $b = $g->boundary();
+-        $this->assertEquals('MULTIPOINT (0 0, 10 10)', $writer->write($b));
++        $this->assertEquals('MULTIPOINT ((0 0), (10 10))', $writer->write($b));
+ 
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0),( 5 5, 5 6, 6 6, 6 5, 5 5))');
+         $b = $g->boundary();
+@@ -586,7 +586,7 @@ class GeometryTest extends GEOSTest
+         $this->assertEquals( 'POINT (0 0)', $writer->write($gi));
+         $g2 = $reader->read('POINT(1 0)');
+         $gi = $g->union($g2);
+-        $this->assertEquals( 'MULTIPOINT (0 0, 1 0)', $writer->write($gi));
++        $this->assertEquals( 'MULTIPOINT ((0 0), (1 0))', $writer->write($gi));
+ 
+         /* LINE - POINT */
+         $g = $reader->read('LINESTRING(0 0, 10 0)');
+@@ -616,16 +616,16 @@ class GeometryTest extends GEOSTest
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('LINESTRING(5 -10, 5 10)');
+         $gi = $g->union($g2);
+-        $this->assertEquals('GEOMETRYCOLLECTION (LINESTRING (5 -10, 5 0), POLYGON ((5 0, 0 0, 0 10, 5 10, 10 10, 10 0, 5 0)))', $writer->write($gi));
++        $this->assertEquals('GEOMETRYCOLLECTION (POLYGON ((0 0, 0 10, 5 10, 10 10, 10 0, 5 0, 0 0)), LINESTRING (5 -10, 5 0))', $writer->write($gi));
+         $g2 = $reader->read('LINESTRING(10 0, 20 0)');
+         $gi = $g->union($g2);
+-        $this->assertEquals('GEOMETRYCOLLECTION (LINESTRING (10 0, 20 0), POLYGON ((10 0, 0 0, 0 10, 10 10, 10 0)))', $writer->write($gi));
++        $this->assertEquals('GEOMETRYCOLLECTION (POLYGON ((0 0, 0 10, 10 10, 10 0, 0 0)), LINESTRING (10 0, 20 0))', $writer->write($gi));
+ 
+         /* POLY - POLY */
+         $g = $reader->read('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))');
+         $g2 = $reader->read('POLYGON((5 -5, 5 5, 15 5, 15 -5, 5 -5))');
+         $gi = $g->union($g2);
+-        $this->assertEquals('POLYGON ((5 0, 0 0, 0 10, 10 10, 10 5, 15 5, 15 -5, 5 -5, 5 0))', $writer->write($gi));
++        $this->assertEquals('POLYGON ((0 0, 0 10, 10 10, 10 5, 15 5, 15 -5, 5 -5, 5 0, 0 0))', $writer->write($gi));
+     }
+ 
+     public function testGeometry_unaryunion()
+@@ -642,10 +642,10 @@ class GeometryTest extends GEOSTest
+                  ((10 10, 10 14, 14 14, 14 10, 10 10),
+                   (11 11, 11 12, 12 12, 12 11, 11 11)),
+                  ((0 0, 11 0, 11 11, 0 11, 0 0))
+-                ))');
++                )');
+ 
+         $gu = $g->union();
+-        $this->assertEquals('POLYGON ((1 0, 0 0, 0 1, 0 11, 10 11, 10 14, 14 14, 14 10, 11 10, 11 0, 1 0), (11 11, 12 11, 12 12, 11 12, 11 11))', $writer->write($gu));
++        $this->assertEquals('POLYGON ((0 0, 0 1, 0 11, 10 11, 10 14, 14 14, 14 10, 11 10, 11 0, 1 0, 0 0), (12 12, 11 12, 11 11, 12 11, 12 12))', $writer->write($gu));
+ 
+         $g = $reader->read('MULTILINESTRING(
+                  (0 0, 1 0, 1 1, 0 1, 0 0),
+@@ -655,7 +655,7 @@ class GeometryTest extends GEOSTest
+                 )');
+ 
+         $gu = $g->union();
+-        $this->assertEquals('MULTILINESTRING ((0 0, 1 0), (1 0, 1 1, 0 1), (0 1, 0 0), (1 0, 11 0, 11 10), (11 10, 11 11), (11 11, 10 11), (10 11, 0 11, 0 1), (11 11, 11 12, 12 12, 12 11, 11 11), (10 10, 10 11), (10 11, 10 14, 14 14, 14 10, 11 10), (11 10, 10 10))', $writer->write($gu));
++        $this->assertEquals('MULTILINESTRING ((0 0, 1 0), (1 0, 1 1, 0 1), (0 1, 0 0), (10 10, 10 11), (10 11, 10 14, 14 14, 14 10, 11 10), (11 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11), (1 0, 11 0, 11 10), (11 10, 11 11), (11 11, 10 11), (10 11, 0 11, 0 1))', $writer->write($gu));
+ 
+         $g = $reader->read('MULTIPOINT(
+                  0 0, 1 0, 1 1, 0 1, 0 0,
+@@ -665,7 +665,7 @@ class GeometryTest extends GEOSTest
+                 )');
+ 
+         $gu = $g->union();
+-        $this->assertEquals('MULTIPOINT (0 0, 0 1, 0 11, 1 0, 1 1, 10 10, 10 14, 11 0, 11 11, 11 12, 12 11, 12 12, 14 10, 14 14)', $writer->write($gu));
++        $this->assertEquals('MULTIPOINT ((0 0), (0 1), (0 11), (1 0), (1 1), (10 10), (10 14), (11 0), (11 11), (11 12), (12 11), (12 12), (14 10), (14 14))', $writer->write($gu));
+ 
+         $g = $reader->read('GEOMETRYCOLLECTION(
+                 MULTIPOLYGON(
+@@ -688,7 +688,7 @@ class GeometryTest extends GEOSTest
+                 ))');
+ 
+         $gu = $g->union();
+-        $this->assertEquals('GEOMETRYCOLLECTION (POINT (-10 -10), LINESTRING (-8 8, -8 6), POLYGON ((1 0, 0 0, 0 1, 0 11, 10 11, 10 14, 14 14, 14 10, 11 10, 11 0, 1 0), (11 12, 11 11, 12 11, 12 12, 11 12)))', $writer->write($gu));
++        $this->assertEquals('GEOMETRYCOLLECTION (POINT (-10 -10), POLYGON ((0 0, 0 1, 0 11, 10 11, 10 14, 14 14, 14 10, 11 10, 11 0, 1 0, 0 0), (11 11, 12 11, 12 12, 11 12, 11 11)), LINESTRING (-8 8, -8 6))', $writer->write($gu));
+     }
+ 
+     public function testGeometry_pointOnSurface()
+@@ -818,7 +818,7 @@ class GeometryTest extends GEOSTest
+             LINESTRING(185 221, 88 275, 180 316),
+             LINESTRING(185 221, 292 281, 180 316),
+             LINESTRING(189 98, 83 187, 185 221),
+-            LINESTRING(189 98, 325 168, 185 221))
++            LINESTRING(189 98, 325 168, 185 221)
+             )');
+ 
+         $g2 = $reader->read('POINT(0 0)');
+@@ -960,14 +960,14 @@ class GeometryTest extends GEOSTest
+         LINESTRING (0 0, 2 3),
+         MULTIPOINT (0 0, 2 3),
+         POINT (9 0),
+-        POINT(1 0)),
+-        LINESTRING EMPTY
++        POINT(1 0),
++        LINESTRING EMPTY)
+     ');
+ 
+         $gs = $g->extractUniquePoints();
+         if ( ! $gs ) RETURN_NULL(); /* should get an exception before */
+ 
+-        $this->assertEquals('MULTIPOINT (0 0, 1 0, 1 1, 0 1, 10 10, 10 14, 14 14, 14 10, 11 11, 11 12, 12 12, 12 11, 2 3, 3 4, 9 0)', $writer->write($gs));
++        $this->assertEquals('MULTIPOINT ((0 0), (1 0), (1 1), (0 1), (10 10), (10 14), (14 14), (14 10), (11 11), (11 12), (12 12), (12 11), (2 3), (3 4), (9 0))', $writer->write($gs));
+     }
+ 
+     public function testGeometry_relationalOps()
+@@ -1229,11 +1229,11 @@ class GeometryTest extends GEOSTest
+         $this->assertType( 'array', $val );
+         $this->assertFalse( $val['valid'] );
+         $this->assertEquals( 'Invalid Coordinate', $val['reason'] );
+-        $this->assertEquals( 'POINT (0 nan)',
++        $this->assertEquals( 'POINT (0 NaN)',
+             $writer->write($val['location']) );
+ 
+         $g = $reader->read(
+-           'POLYGON((0 0, -10 10, 10 10, 0 0, 4 5, -4 5, 0 0)))'
++           'POLYGON((0 0, -10 10, 10 10, 0 0, 4 5, -4 5, 0 0))'
+         );
+         $val = $g->checkValidity();
+         $this->assertType( 'array', $val );
+@@ -1243,7 +1243,7 @@ class GeometryTest extends GEOSTest
+             $writer->write($val['location']) );
+ 
+         $g = $reader->read(
+-           'POLYGON((0 0, -10 10, 10 10, 0 0, 4 5, -4 5, 0 0)))'
++           'POLYGON((0 0, -10 10, 10 10, 0 0, 4 5, -4 5, 0 0))'
+         );
+         $flags = GEOSVALID_ALLOW_SELFTOUCHING_RING_FORMING_HOLE;
+         $val = $g->checkValidity($flags);
+@@ -1306,7 +1306,7 @@ class GeometryTest extends GEOSTest
+             $this->assertFalse( $g->isClosed() );
+             $this->assertTrue(FALSE);
+         } catch (Exception $e) {
+-            $this->assertContains('LineString', $e->getMessage());
++            $this->assertContains('Curve', $e->getMessage());
+         }
+ 
+         $g = $reader->read('LINESTRING(0 0, 10 0, 5 5, 5 -5)');
+@@ -1438,7 +1438,7 @@ class GeometryTest extends GEOSTest
+             $g->numInteriorRings();
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'Polygon', $e->getMessage() );
++            $this->assertContains( 'Surface', $e->getMessage() );
+         }
+ 
+     }
+@@ -1459,7 +1459,7 @@ class GeometryTest extends GEOSTest
+             $g->numPoints();
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'LineString', $e->getMessage() );
++            $this->assertContains( 'SimpleCurve', $e->getMessage() );
+         }
+ 
+     }
+@@ -1532,7 +1532,7 @@ class GeometryTest extends GEOSTest
+             $g->interiorRingN(0);
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'Polygon', $e->getMessage() );
++            $this->assertContains( 'Surface', $e->getMessage() );
+         }
+ 
+     }
+@@ -1558,7 +1558,7 @@ class GeometryTest extends GEOSTest
+             $g->exteriorRing(0);
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'Polygon', $e->getMessage() );
++            $this->assertContains( 'Surface', $e->getMessage() );
+         }
+ 
+     }
+@@ -1685,7 +1685,7 @@ class GeometryTest extends GEOSTest
+             $g->pointN(0);
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'LineString', $e->getMessage() );
++            $this->assertContains( 'SimpleCurve', $e->getMessage() );
+         }
+ 
+     }
+@@ -1721,7 +1721,7 @@ class GeometryTest extends GEOSTest
+             $g->pointN(0);
+             $this->assertTrue( FALSE );
+         } catch (Exception $e) {
+-            $this->assertContains( 'LineString', $e->getMessage() );
++            $this->assertContains( 'SimpleCurve', $e->getMessage() );
+         }
+ 
+     }
+diff --git a/tests/002_WKTWriter.phpt b/tests/002_WKTWriter.phpt
+index 3682a3a..fb0e745 100644
+--- a/tests/002_WKTWriter.phpt
++++ b/tests/002_WKTWriter.phpt
+@@ -31,7 +31,7 @@ class WKTWriterTest extends GEOSTest
+ 
+         $g = $reader->read('POINT(6 7)');
+ 
+-        $this->assertEquals('POINT (6.0000000000000000 7.0000000000000000)',
++        $this->assertEquals('POINT (6 7)',
+             $writer->write($g));
+     }
+ 
+@@ -68,7 +68,7 @@ class WKTWriterTest extends GEOSTest
+ 
+         $in[] = 'POINT (0 0)';
+         $in[] = 'POINT EMPTY';
+-        $in[] = 'MULTIPOINT (0 1, 2 3)';
++        $in[] = 'MULTIPOINT ((0 1), (2 3))';
+         $in[] = 'MULTIPOINT EMPTY';
+         $in[] = 'LINESTRING (0 0, 2 3)';
+         $in[] = 'LINESTRING EMPTY';
+@@ -78,7 +78,7 @@ class WKTWriterTest extends GEOSTest
+         $in[] = 'POLYGON EMPTY';
+         $in[] = 'MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11)))';
+         $in[] = 'MULTIPOLYGON EMPTY';
+-        $in[] = 'GEOMETRYCOLLECTION (MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11))), POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0)), MULTILINESTRING ((0 0, 2 3), (10 10, 3 4)), LINESTRING (0 0, 2 3), MULTIPOINT (0 0, 2 3), POINT (9 0))';
++        $in[] = 'GEOMETRYCOLLECTION (MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11))), POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0)), MULTILINESTRING ((0 0, 2 3), (10 10, 3 4)), LINESTRING (0 0, 2 3), MULTIPOINT ((0 0), (2 3)), POINT (9 0))';
+         $in[] = 'GEOMETRYCOLLECTION EMPTY';
+ 
+         foreach ($in as $i) {
+@@ -98,7 +98,7 @@ class WKTWriterTest extends GEOSTest
+ 
+         $g = $reader->read('POINT(6.123456 7.123456)');
+ 
+-        $this->assertEquals('POINT (6.1234560000000000 7.1234560000000000)',
++        $this->assertEquals('POINT (6.123456 7.123456)',
+             $writer->write($g));
+ 
+         $writer->setRoundingPrecision(2);
+@@ -122,7 +122,7 @@ class WKTWriterTest extends GEOSTest
+         }
+ 
+         $writer = new GEOSWKTWriter();
+-        $this->assertEquals(2, $writer->getOutputDimension());
++        $this->assertEquals(4, $writer->getOutputDimension());
+     }
+ 
+     public function testWKTWriter_setOutputDimension()
+@@ -139,7 +139,7 @@ class WKTWriterTest extends GEOSTest
+         $writer->setTrim(TRUE);
+ 
+         # Only 2d by default
+-        $this->assertEquals('POINT (1 2)', $writer->write($g3d));
++        $this->assertEquals('POINT Z (1 2 3)', $writer->write($g3d));
+ 
+         # 3d if requested _and_ available
+         $writer->setOutputDimension(3);
+@@ -151,15 +151,19 @@ class WKTWriterTest extends GEOSTest
+             $writer->setOutputDimension(1);
+             $this->assertTrue(FALSE);
+         } catch (Exception $e) {
+-            $this->assertContains('must be 2 or 3', $e->getMessage());
++            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
+         }
+ 
+-        # 4 is invalid
++        # 4 (XYZM) accepted in libgeos >= 3.12
++        $writer->setOutputDimension(4);
++        $this->assertEquals(4, $writer->getOutputDimension());
++
++        # 5 is invalid
+         try {
+-            $writer->setOutputDimension(4);
++            $writer->setOutputDimension(5);
+             $this->assertTrue(FALSE);
+         } catch (Exception $e) {
+-            $this->assertContains('must be 2 or 3', $e->getMessage());
++            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
+         }
+ 
+     }
+diff --git a/tests/004_WKBWriter.phpt b/tests/004_WKBWriter.phpt
+index 3c13644..c2eabd9 100644
+--- a/tests/004_WKBWriter.phpt
++++ b/tests/004_WKBWriter.phpt
+@@ -18,7 +18,7 @@ class WKBWriterTest extends GEOSTest
+     public function testWKBWriter_getOutputDimension()
+     {
+         $writer = new GEOSWKBWriter();
+-        $this->assertEquals(2, $writer->getOutputDimension());
++        $this->assertEquals(4, $writer->getOutputDimension());
+     }
+ 
+     public function testWKBWriter_setOutputDimension()
+@@ -34,15 +34,19 @@ class WKBWriterTest extends GEOSTest
+             $writer->setOutputDimension(1);
+             $this->assertTrue(FALSE);
+         } catch (Exception $e) {
+-            $this->assertContains('must be 2 or 3', $e->getMessage());
++            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
+         }
+ 
+-        # 4 is invalid
++        # 4 (XYZM) accepted in libgeos >= 3.12
++        $writer->setOutputDimension(4);
++        $this->assertEquals(4, $writer->getOutputDimension());
++
++        # 5 is invalid
+         try {
+-            $writer->setOutputDimension(4);
++            $writer->setOutputDimension(5);
+             $this->assertTrue(FALSE);
+         } catch (Exception $e) {
+-            $this->assertContains('must be 2 or 3', $e->getMessage());
++            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
+         }
+     }
+ 
+diff --git a/tests/005_WKBReader.phpt b/tests/005_WKBReader.phpt
+index 7b24994..3281e90 100644
+--- a/tests/005_WKBReader.phpt
++++ b/tests/005_WKBReader.phpt
+@@ -37,8 +37,8 @@ class WKBReaderTest extends GEOSTest
+         return array(
+             array('0101000020e6100000000000000000f03f0000000000000040', 'POINT (1.0 2.0)', 4326),
+             array('01010000a0e6100000333333333333f33f3333333333330b406666666666661640', 'POINT Z (1.2 3.4 5.6)', 4326),
+-            array('0104000000030000000101000000000000000000f03f0000000000000040010100000000000000000008400000000000001040010100000000000000000014400000000000001840', 'MULTIPOINT (1.0 2.0, 3.0 4.0, 5.0 6.0)', 0),
+-            array('0104000080030000000101000080000000000000f03f00000000000000400000000000000840010100008000000000000010400000000000001440000000000000184001010000800000000000001c4000000000000020400000000000002240', 'MULTIPOINT Z (1.0 2.0 3.0, 4.0 5.0 6.0, 7.0 8.0 9.0)', 0),
++            array('0104000000030000000101000000000000000000f03f0000000000000040010100000000000000000008400000000000001040010100000000000000000014400000000000001840', 'MULTIPOINT ((1.0 2.0), (3.0 4.0), (5.0 6.0))', 0),
++            array('0104000080030000000101000080000000000000f03f00000000000000400000000000000840010100008000000000000010400000000000001440000000000000184001010000800000000000001c4000000000000020400000000000002240', 'MULTIPOINT Z ((1.0 2.0 3.0), (4.0 5.0 6.0), (7.0 8.0 9.0))', 0),
+             array('01040000207b00000000000000', 'MULTIPOINT EMPTY', 123),
+             array('0102000020c801000003000000000000000000f03f00000000000000400000000000000840000000000000104000000000000008400000000000000040', 'LINESTRING (1.0 2.0, 3.0 4.0, 3.0 2.0)', 456),
+             array('01020000a0db03000003000000000000000000f03f000000000000004000000000000008400000000000001040000000000000144000000000000018400000000000001c4000000000000020400000000000002240', 'LINESTRING Z (1.0 2.0 3.0, 4.0 5.0 6.0, 7.0 8.0 9.0)', 987),
+@@ -53,7 +53,7 @@ class WKBReaderTest extends GEOSTest
+             array('0106000020020000000100000001030000000200000005000000000000000000000000000000000000000000000000000000000000000000084000000000000008400000000000000840000000000000084000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f000000000000f03f0000000000000040000000000000004000000000000000400000000000000040000000000000f03f000000000000f03f000000000000f03f', 'MULTIPOLYGON (((0.0 0.0, 0.0 3.0, 3.0 3.0, 3.0 0.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0)))', 2),
+             array('01060000a003000000010000000103000080020000000500000000000000000000000000000000000000000000000000000000000000000000000000000000000840000000000000000000000000000008400000000000000840000000000000000000000000000008400000000000000000000000000000000000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f9a9999999999f13f000000000000f03f00000000000000409a9999999999f13f000000000000004000000000000000409a9999999999f13f0000000000000040000000000000f03f9a9999999999f13f000000000000f03f000000000000f03f9a9999999999f13f', 'MULTIPOLYGON Z (((0.0 0.0 0.0, 0.0 3.0 0.0, 3.0 3.0 0.0, 3.0 0.0 0.0, 0.0 0.0 0.0), (1.0 1.0 1.1, 1.0 2.0 1.1, 2.0 2.0 1.1, 2.0 1.0 1.1, 1.0 1.0 1.1)))', 3),
+             array('01060000200400000000000000', 'MULTIPOLYGON EMPTY', 4),
+-            array('01070000200f270000060000000101000000000000000000f03f00000000000000400104000000030000000101000000000000000000f03f0000000000000040010100000000000000000008400000000000001040010100000000000000000014400000000000001840010200000003000000000000000000f03f00000000000000400000000000000840000000000000104000000000000008400000000000000040010500000002000000010200000002000000000000000000f03f0000000000000000000000000000044000000000000000400102000000020000009a9999999999174000000000000020409a99999999990d40000000000000f03f01030000000200000005000000000000000000000000000000000000000000000000000000000000000000084000000000000008400000000000000840000000000000084000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f000000000000f03f0000000000000040000000000000004000000000000000400000000000000040000000000000f03f000000000000f03f000000000000f03f01060000000100000001030000000200000005000000000000000000000000000000000000000000000000000000000000000000084000000000000008400000000000000840000000000000084000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f000000000000f03f0000000000000040000000000000004000000000000000400000000000000040000000000000f03f000000000000f03f000000000000f03f', 'GEOMETRYCOLLECTION (POINT (1.0 2.0), MULTIPOINT (1.0 2.0, 3.0 4.0, 5.0 6.0), LINESTRING (1.0 2.0, 3.0 4.0, 3.0 2.0), MULTILINESTRING ((1.0 0.0, 2.5 2.0), (5.9 8.0, 3.7 1.0)), POLYGON ((0.0 0.0, 0.0 3.0, 3.0 3.0, 3.0 0.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0)), MULTIPOLYGON (((0.0 0.0, 0.0 3.0, 3.0 3.0, 3.0 0.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0))))', 9999),
++            array('01070000200f270000060000000101000000000000000000f03f00000000000000400104000000030000000101000000000000000000f03f0000000000000040010100000000000000000008400000000000001040010100000000000000000014400000000000001840010200000003000000000000000000f03f00000000000000400000000000000840000000000000104000000000000008400000000000000040010500000002000000010200000002000000000000000000f03f0000000000000000000000000000044000000000000000400102000000020000009a9999999999174000000000000020409a99999999990d40000000000000f03f01030000000200000005000000000000000000000000000000000000000000000000000000000000000000084000000000000008400000000000000840000000000000084000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f000000000000f03f0000000000000040000000000000004000000000000000400000000000000040000000000000f03f000000000000f03f000000000000f03f01060000000100000001030000000200000005000000000000000000000000000000000000000000000000000000000000000000084000000000000008400000000000000840000000000000084000000000000000000000000000000000000000000000000005000000000000000000f03f000000000000f03f000000000000f03f0000000000000040000000000000004000000000000000400000000000000040000000000000f03f000000000000f03f000000000000f03f', 'GEOMETRYCOLLECTION (POINT (1.0 2.0), MULTIPOINT ((1.0 2.0), (3.0 4.0), (5.0 6.0)), LINESTRING (1.0 2.0, 3.0 4.0, 3.0 2.0), MULTILINESTRING ((1.0 0.0, 2.5 2.0), (5.9 8.0, 3.7 1.0)), POLYGON ((0.0 0.0, 0.0 3.0, 3.0 3.0, 3.0 0.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0)), MULTIPOLYGON (((0.0 0.0, 0.0 3.0, 3.0 3.0, 3.0 0.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0))))', 9999),
+             array('01070000200903000000000000', 'GEOMETRYCOLLECTION EMPTY', 777),
+         );
+     }
+-- 
+2.34.1
+
