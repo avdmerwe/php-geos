@@ -18,7 +18,7 @@ class WKBWriterTest extends GEOSTest
     public function testWKBWriter_getOutputDimension()
     {
         $writer = new GEOSWKBWriter();
-        $this->assertEquals(2, $writer->getOutputDimension());
+        $this->assertEquals(4, $writer->getOutputDimension());
     }
 
     public function testWKBWriter_setOutputDimension()
@@ -34,15 +34,19 @@ class WKBWriterTest extends GEOSTest
             $writer->setOutputDimension(1);
             $this->assertTrue(FALSE);
         } catch (Exception $e) {
-            $this->assertContains('must be 2 or 3', $e->getMessage());
+            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
         }
 
-        # 4 is invalid
+        # 4 (XYZM) accepted in libgeos >= 3.12
+        $writer->setOutputDimension(4);
+        $this->assertEquals(4, $writer->getOutputDimension());
+
+        # 5 is invalid
         try {
-            $writer->setOutputDimension(4);
+            $writer->setOutputDimension(5);
             $this->assertTrue(FALSE);
         } catch (Exception $e) {
-            $this->assertContains('must be 2 or 3', $e->getMessage());
+            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
         }
     }
 

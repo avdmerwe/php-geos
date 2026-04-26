@@ -1,3 +1,27 @@
+php-geos (1.0.0+git20240129-2~jammy1) jammy; urgency=medium
+
+  * Update tests/*.phpt assertions for libgeos 3.14.1 default behavioural
+    changes. Six tests (000-005) were previously passing 5/6 against
+    libgeos 3.10.2 but failing 4/6 against 3.14.1; they now pass 6/6:
+    - 001 Geometry: WKT writer canonicalises -0 -> 0; empty intersection
+      returns input-type EMPTY (POINT EMPTY rather than GEOMETRYCOLLECTION
+      EMPTY for POINT-POINT etc); polygon ring start vertex normalised to
+      lex-smallest; collection member ordering changed; mitre-join
+      buffer corner clamping shifted; offsetCurve right-side reversed
+      orientation + denser interpolation; MULTIPOINT WKT format now
+      `MULTIPOINT ((x y), ...)`; argument-type exception messages broadened
+      ("Polygon" -> "Surface", "LineString" -> "Curve" / "SimpleCurve").
+      Fixed three pre-existing WKT parse-typo testcases that 3.10's lenient
+      parser silently accepted (extra `)` in GEOMETRYCOLLECTION literals).
+    - 002 WKTWriter: default trim is now TRUE; setRoundingPrecision(0)
+      yields trimmed output; setOutputDimension accepts 4 (XYZM); error
+      message text broadened to "must be 2, 3, or 4".
+    - 004 WKBWriter: getOutputDimension default is now 4 (XYZM); accepts
+      4 as valid; error message broadened.
+    - 005 WKBReader: round-trip WKT data updated for new MULTIPOINT format.
+
+ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 16:00:00 +0200
+
 php-geos (1.0.0+git20240129-1~jammy1) jammy; urgency=medium
 
   * Baseline rebuild from gitea HEAD (dfe1ab1, 2024-01-29):

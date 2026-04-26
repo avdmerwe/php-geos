@@ -31,7 +31,7 @@ class WKTWriterTest extends GEOSTest
 
         $g = $reader->read('POINT(6 7)');
 
-        $this->assertEquals('POINT (6.0000000000000000 7.0000000000000000)',
+        $this->assertEquals('POINT (6 7)',
             $writer->write($g));
     }
 
@@ -68,7 +68,7 @@ class WKTWriterTest extends GEOSTest
 
         $in[] = 'POINT (0 0)';
         $in[] = 'POINT EMPTY';
-        $in[] = 'MULTIPOINT (0 1, 2 3)';
+        $in[] = 'MULTIPOINT ((0 1), (2 3))';
         $in[] = 'MULTIPOINT EMPTY';
         $in[] = 'LINESTRING (0 0, 2 3)';
         $in[] = 'LINESTRING EMPTY';
@@ -78,7 +78,7 @@ class WKTWriterTest extends GEOSTest
         $in[] = 'POLYGON EMPTY';
         $in[] = 'MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11)))';
         $in[] = 'MULTIPOLYGON EMPTY';
-        $in[] = 'GEOMETRYCOLLECTION (MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11))), POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0)), MULTILINESTRING ((0 0, 2 3), (10 10, 3 4)), LINESTRING (0 0, 2 3), MULTIPOINT (0 0, 2 3), POINT (9 0))';
+        $in[] = 'GEOMETRYCOLLECTION (MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((10 10, 10 14, 14 14, 14 10, 10 10), (11 11, 11 12, 12 12, 12 11, 11 11))), POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0)), MULTILINESTRING ((0 0, 2 3), (10 10, 3 4)), LINESTRING (0 0, 2 3), MULTIPOINT ((0 0), (2 3)), POINT (9 0))';
         $in[] = 'GEOMETRYCOLLECTION EMPTY';
 
         foreach ($in as $i) {
@@ -98,7 +98,7 @@ class WKTWriterTest extends GEOSTest
 
         $g = $reader->read('POINT(6.123456 7.123456)');
 
-        $this->assertEquals('POINT (6.1234560000000000 7.1234560000000000)',
+        $this->assertEquals('POINT (6.123456 7.123456)',
             $writer->write($g));
 
         $writer->setRoundingPrecision(2);
@@ -122,7 +122,7 @@ class WKTWriterTest extends GEOSTest
         }
 
         $writer = new GEOSWKTWriter();
-        $this->assertEquals(2, $writer->getOutputDimension());
+        $this->assertEquals(4, $writer->getOutputDimension());
     }
 
     public function testWKTWriter_setOutputDimension()
@@ -139,7 +139,7 @@ class WKTWriterTest extends GEOSTest
         $writer->setTrim(TRUE);
 
         # Only 2d by default
-        $this->assertEquals('POINT (1 2)', $writer->write($g3d));
+        $this->assertEquals('POINT Z (1 2 3)', $writer->write($g3d));
 
         # 3d if requested _and_ available
         $writer->setOutputDimension(3);
@@ -151,15 +151,19 @@ class WKTWriterTest extends GEOSTest
             $writer->setOutputDimension(1);
             $this->assertTrue(FALSE);
         } catch (Exception $e) {
-            $this->assertContains('must be 2 or 3', $e->getMessage());
+            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
         }
 
-        # 4 is invalid
+        # 4 (XYZM) accepted in libgeos >= 3.12
+        $writer->setOutputDimension(4);
+        $this->assertEquals(4, $writer->getOutputDimension());
+
+        # 5 is invalid
         try {
-            $writer->setOutputDimension(4);
+            $writer->setOutputDimension(5);
             $this->assertTrue(FALSE);
         } catch (Exception $e) {
-            $this->assertContains('must be 2 or 3', $e->getMessage());
+            $this->assertContains('must be 2, 3, or 4', $e->getMessage());
         }
 
     }
