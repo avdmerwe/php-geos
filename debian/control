@@ -1,0 +1,28 @@
+Source: php-geos
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+XSBC-Original-Maintainer: Debian GIS Project <pkg-grass-devel@lists.alioth.debian.org>
+Uploaders: Bas Couwenberg <sebastic@debian.org>
+Section: science
+Priority: optional
+Build-Depends: debhelper-compat (= 13),
+               dh-php,
+               libgeos-dev,
+               php-dev,
+Standards-Version: 4.7.0
+Vcs-Browser: https://salsa.debian.org/debian-gis-team/php-geos
+Vcs-Git: https://salsa.debian.org/debian-gis-team/php-geos.git
+Homepage: https://git.osgeo.org/gitea/geos/php-geos/
+Rules-Requires-Root: no
+
+Package: php-geos
+Architecture: any
+Section: php
+Depends: ${php:Depends},
+         ${shlibs:Depends},
+         ${misc:Depends}
+Description: GEOS bindings for PHP
+ GEOS provides a spatial object model and fundamental geometric
+ functions. It implements the geometry model defined in the
+ OpenGIS Consortium Simple Features Specification for SQL.
+ .
+ This package contains the PHP bindings for GEOS.

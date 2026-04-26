@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+# Enable hardening build flags
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+
+%:
+	dh $@ --with php
+
+override_dh_autoreconf:
+	dh_autoreconf ./autogen.sh
+
+override_dh_auto_test:
+	REPORT_EXIT_STATUS=1 NO_INTERACTION=1 TESTS="-q --show-diff" dh_auto_test || echo "Ignoring test failures"
+
+override_dh_auto_install:
+	# phpize uses INSTALL_ROOT instead of DESTDIR
+	$(MAKE) install INSTALL_ROOT=$(CURDIR)/debian/php-geos

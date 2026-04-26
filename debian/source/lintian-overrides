@@ -1,0 +1,3 @@
+# php-geos is a PECL extension not a PEAR package.
+pear-package-without-pkg-php-tools-builddep
+

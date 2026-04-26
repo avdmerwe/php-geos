@@ -1,0 +1,8 @@
+config.h
+config.nice
+tests/*_*.diff
+tests/*_*.exp
+tests/*_*.log
+tests/*_*.out
+tests/*_*.php
+tests/*_*.sh

@@ -1,0 +1,16 @@
+Description: fix for 8.0.0RC1
+Author: Remi Collet <remi@remirepo.net>
+Origin: https://git.remirepo.net/cgit/rpms/php/php-geos.git/tree/0005-fix-for-8.0.0RC1.patch
+Bug: https://git.osgeo.org/gitea/geos/php-geos/issues/26
+
+--- a/tests/003_WKTReader.phpt
++++ b/tests/003_WKTReader.phpt
+@@ -100,7 +100,7 @@ class WKTReaderTest extends GEOSTest
+             $this->assertContains('expects exactly 1 parameter',
+                                   $e->getMessage());
+         } catch (Error $e) {
+-            $this->assertContains('expects exactly 1 parameter', $e->getMessage());
++            $this->assertContains('expects exactly 1', $e->getMessage());
+         }
+     }
+ }

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "remove" ]; then
+	phpdismod geos
+fi
+
+exit 0
