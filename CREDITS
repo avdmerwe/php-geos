@@ -1,3 +1,4 @@
 geos
 Sandro Santilli <strk@kbt.io> - GEOS
 J Smith <dark.panda@gmail.com> <jay@php.net> - PHP packaging
+Abraham van der Merwe <abz@frogfoot.com> - 1.1.0 fork (libgeos 3.14.x extended bindings)
