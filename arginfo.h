@@ -518,3 +518,82 @@ ZEND_END_ARG_INFO()
 #define arginfo_GEOSBuildArea                arginfo_geom
 #define arginfo_GEOSDisjointSubsetUnion      arginfo_geom
 
+
+/* -- Item 6: GeoJSON I/O ------------------------- */
+
+#define arginfo_GeoJSONReader_construct      arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_GeoJSONReader_read, 0, 0, 1)
+    ZEND_ARG_INFO(0, json)
+ZEND_END_ARG_INFO()
+
+#define arginfo_GeoJSONWriter_construct      arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_GeoJSONWriter_write, 0, 0, 1)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, indent)
+ZEND_END_ARG_INFO()
+
+#define arginfo_GeoJSONWriter_setOutputDimension   arginfo_num
+#define arginfo_GeoJSONWriter_getOutputDimension   arginfo_void
+
+
+/* -- Item 12: Curved geometry factory statics ---- */
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createCircularString, 0, 0, 1)
+    ZEND_ARG_INFO(0, coordseq)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_createEmptyCircularString  arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createCompoundCurve, 0, 0, 1)
+    ZEND_ARG_INFO(0, components)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_createEmptyCompoundCurve   arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createCurvePolygon, 0, 0, 1)
+    ZEND_ARG_INFO(0, shell)
+    ZEND_ARG_INFO(0, holes)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_createEmptyCurvePolygon    arginfo_void
+
+
+/* -- Item 16: Geometry construction factories ---- */
+
+#define arginfo_Geometry_createPoint         arginfo_Geometry_createCircularString
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createPointFromXY, 0, 0, 2)
+    ZEND_ARG_INFO(0, x)
+    ZEND_ARG_INFO(0, y)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_createEmptyPoint    arginfo_void
+#define arginfo_Geometry_createLineString    arginfo_Geometry_createCircularString
+#define arginfo_Geometry_createEmptyLineString arginfo_void
+#define arginfo_Geometry_createLinearRing    arginfo_Geometry_createCircularString
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createPolygon, 0, 0, 1)
+    ZEND_ARG_INFO(0, shell)
+    ZEND_ARG_INFO(0, holes)
+ZEND_END_ARG_INFO()
+
+#define arginfo_Geometry_createEmptyPolygon  arginfo_void
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createCollection, 0, 0, 2)
+    ZEND_ARG_INFO(0, type)
+    ZEND_ARG_INFO(0, geoms)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createEmptyCollection, 0, 0, 1)
+    ZEND_ARG_INFO(0, type)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_Geometry_createRectangle, 0, 0, 4)
+    ZEND_ARG_INFO(0, xmin)
+    ZEND_ARG_INFO(0, ymin)
+    ZEND_ARG_INFO(0, xmax)
+    ZEND_ARG_INFO(0, ymax)
+ZEND_END_ARG_INFO()
+

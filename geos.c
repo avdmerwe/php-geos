@@ -480,6 +480,27 @@ PHP_METHOD(Geometry, getYMax);
 PHP_METHOD(Geometry, getExtent);
 PHP_METHOD(Geometry, buildArea);
 
+/* Item 12 — curved geometry factory statics */
+PHP_METHOD(Geometry, createCircularString);
+PHP_METHOD(Geometry, createEmptyCircularString);
+PHP_METHOD(Geometry, createCompoundCurve);
+PHP_METHOD(Geometry, createEmptyCompoundCurve);
+PHP_METHOD(Geometry, createCurvePolygon);
+PHP_METHOD(Geometry, createEmptyCurvePolygon);
+
+/* Item 16 — geometry construction factory statics */
+PHP_METHOD(Geometry, createPoint);
+PHP_METHOD(Geometry, createPointFromXY);
+PHP_METHOD(Geometry, createEmptyPoint);
+PHP_METHOD(Geometry, createLineString);
+PHP_METHOD(Geometry, createEmptyLineString);
+PHP_METHOD(Geometry, createLinearRing);
+PHP_METHOD(Geometry, createPolygon);
+PHP_METHOD(Geometry, createEmptyPolygon);
+PHP_METHOD(Geometry, createCollection);
+PHP_METHOD(Geometry, createEmptyCollection);
+PHP_METHOD(Geometry, createRectangle);
+
 static zend_function_entry Geometry_methods[] = {
     PHP_ME(Geometry, __construct, arginfo_Geometry_construct, 0)
     PHP_ME(Geometry, __toString, arginfo_Geometry_toString, 0)
@@ -656,6 +677,44 @@ static zend_function_entry Geometry_methods[] = {
     PHP_ME(Geometry, getYMax, arginfo_Geometry_getYMax, 0)
     PHP_ME(Geometry, getExtent, arginfo_Geometry_getExtent, 0)
     PHP_ME(Geometry, buildArea, arginfo_Geometry_buildArea, 0)
+
+    /* Item 12 — curved geometry factory statics */
+    PHP_ME(Geometry, createCircularString, arginfo_Geometry_createCircularString,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyCircularString, arginfo_Geometry_createEmptyCircularString,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createCompoundCurve, arginfo_Geometry_createCompoundCurve,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyCompoundCurve, arginfo_Geometry_createEmptyCompoundCurve,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createCurvePolygon, arginfo_Geometry_createCurvePolygon,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyCurvePolygon, arginfo_Geometry_createEmptyCurvePolygon,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+
+    /* Item 16 — geometry construction factory statics */
+    PHP_ME(Geometry, createPoint, arginfo_Geometry_createPoint,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createPointFromXY, arginfo_Geometry_createPointFromXY,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyPoint, arginfo_Geometry_createEmptyPoint,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createLineString, arginfo_Geometry_createLineString,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyLineString, arginfo_Geometry_createEmptyLineString,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createLinearRing, arginfo_Geometry_createLinearRing,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createPolygon, arginfo_Geometry_createPolygon,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyPolygon, arginfo_Geometry_createEmptyPolygon,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createCollection, arginfo_Geometry_createCollection,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createEmptyCollection, arginfo_Geometry_createEmptyCollection,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+    PHP_ME(Geometry, createRectangle, arginfo_Geometry_createRectangle,
+        ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 
     {NULL, NULL, NULL}
 };
@@ -3213,6 +3272,549 @@ PHP_METHOD(Geometry, buildArea)
     setRelay(return_value, ret);
 }
 
+/* -- Items 12 & 16 — Geometry factory statics ------------- */
+
+/*
+ * Helpers for ownership-transferring factories. See the GEOSCoordSeq lifecycle
+ * comment below for the contract: passing a coord-seq or geometry to a factory
+ * transfers ownership; the input zval's relay must be NULLed after the C call
+ * returns success so the PHP-side dtor does not double-free.
+ *
+ * For factories that take an array of GEOSGeometry inputs (createCollection,
+ * createPolygon holes, createCompoundCurve, createCurvePolygon holes), the
+ * convention is: validate every element first (correct PHP class + non-NULL
+ * relay), build a contiguous C pointer array, call the C constructor, then
+ * NULL out every input zval's relay on success. On any pre-call failure no
+ * relays have been touched, so PHP-side ownership is unchanged.
+ */
+
+/* Extract a non-NULL GEOSGeometry* relay from an object zval, or throw and
+ * return NULL. Verifies the zval is an instance of GEOSGeometry. */
+static GEOSGeometry *
+geomFromZvalForTransfer(zval *zv, const char *ctx)
+{
+    TSRMLS_FETCH();
+    Proxy *proxy;
+    GEOSGeometry *g;
+
+    if (Z_TYPE_P(zv) != IS_OBJECT) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "%s: expected GEOSGeometry, got non-object", ctx);
+        return NULL;
+    }
+    proxy = Z_GEOS_OBJ_P(zv);
+    if (proxy->std.ce != Geometry_ce_ptr) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "%s: expected GEOSGeometry instance", ctx);
+        return NULL;
+    }
+    g = (GEOSGeometry*)proxy->relay;
+    if (!g) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "%s: input GEOSGeometry has already been consumed by a factory",
+            ctx);
+        return NULL;
+    }
+    return g;
+}
+
+/* Build a contiguous C array of GEOSGeometry* from a PHP array of
+ * GEOSGeometry zvals, plus a parallel array of zval* so the caller can
+ * NULL out their relays after a successful handoff.
+ *
+ * On success: returns an emalloc'd GEOSGeometry** array of size *out_n,
+ *  also emallocs *out_zvals (parallel zval* array). Caller efrees both.
+ * On failure: throws and returns NULL; *out_zvals is also NULL.
+ *
+ * On failure NO relays have been touched (caller's array is unchanged).
+ */
+static GEOSGeometry **
+collectGeomsForTransfer(zval *arr, const char *ctx,
+        unsigned int *out_n, zval ***out_zvals)
+{
+    TSRMLS_FETCH();
+    HashTable *ht;
+    GEOSGeometry **geoms;
+    zval **zvs;
+    unsigned int n, i;
+
+    *out_n = 0;
+    *out_zvals = NULL;
+
+    ht = HASH_OF(arr);
+    if (!ht) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "%s: expected an array", ctx);
+        return NULL;
+    }
+    n = zend_hash_num_elements(ht);
+    if (n == 0) {
+        /* Empty array: caller may treat as zero components. */
+        *out_n = 0;
+        return NULL;
+    }
+
+    geoms = (GEOSGeometry**)emalloc(sizeof(GEOSGeometry*) * n);
+    zvs = (zval**)emalloc(sizeof(zval*) * n);
+
+#if PHP_VERSION_ID >= 70000
+    {
+        zval *entry;
+        i = 0;
+        ZEND_HASH_FOREACH_VAL(ht, entry) {
+            GEOSGeometry *g = geomFromZvalForTransfer(entry, ctx);
+            if (!g) {
+                efree(geoms);
+                efree(zvs);
+                return NULL;
+            }
+            geoms[i] = g;
+            zvs[i] = entry;
+            i++;
+        } ZEND_HASH_FOREACH_END();
+    }
+#else
+    {
+        GEOS_PHP_ZVAL data;
+        zend_hash_internal_pointer_reset(ht);
+        for (i = 0; i < n; ++i) {
+            GEOSGeometry *g;
+            if (!GEOS_PHP_HASH_GET_CUR_DATA(ht, data)) {
+                efree(geoms);
+                efree(zvs);
+                zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                    1 TSRMLS_CC, "%s: failed reading element %u", ctx, i);
+                return NULL;
+            }
+            g = geomFromZvalForTransfer(*data, ctx);
+            if (!g) {
+                efree(geoms);
+                efree(zvs);
+                return NULL;
+            }
+            geoms[i] = g;
+            zvs[i] = *data;
+            zend_hash_move_forward(ht);
+        }
+    }
+#endif
+
+    *out_n = n;
+    *out_zvals = zvs;
+    return geoms;
+}
+
+/* GEOSGeometry::createPoint(GEOSCoordSeq) — coord-seq ownership transfers. */
+PHP_METHOD(Geometry, createPoint)
+{
+    zval *csZv;
+    Proxy *csProxy;
+    GEOSCoordSequence *cs;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &csZv) == FAILURE) {
+        RETURN_NULL();
+    }
+    csProxy = Z_GEOS_OBJ_P(csZv);
+    if (csProxy->std.ce != CoordSeq_ce_ptr) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSGeometry::createPoint: expected GEOSCoordSeq");
+        RETURN_NULL();
+    }
+    cs = (GEOSCoordSequence*)csProxy->relay;
+    if (!cs) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createPoint: GEOSCoordSeq already consumed");
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createPoint_r(GEOS_G(handle), cs);
+    if (!g) RETURN_NULL();
+
+    /* Ownership of cs has transferred into g — clear the relay so the
+     * PHP object's dtor does not double-free. */
+    setRelay(csZv, NULL);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createPointFromXY)
+{
+    double x, y;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dd",
+            &x, &y) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createPointFromXY_r(GEOS_G(handle), x, y);
+    if (!g) RETURN_NULL();
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyPoint)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyPoint_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createLineString)
+{
+    zval *csZv;
+    Proxy *csProxy;
+    GEOSCoordSequence *cs;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &csZv) == FAILURE) {
+        RETURN_NULL();
+    }
+    csProxy = Z_GEOS_OBJ_P(csZv);
+    if (csProxy->std.ce != CoordSeq_ce_ptr) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSGeometry::createLineString: expected GEOSCoordSeq");
+        RETURN_NULL();
+    }
+    cs = (GEOSCoordSequence*)csProxy->relay;
+    if (!cs) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createLineString: GEOSCoordSeq already consumed");
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createLineString_r(GEOS_G(handle), cs);
+    if (!g) RETURN_NULL();
+    setRelay(csZv, NULL);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyLineString)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyLineString_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createLinearRing)
+{
+    zval *csZv;
+    Proxy *csProxy;
+    GEOSCoordSequence *cs;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &csZv) == FAILURE) {
+        RETURN_NULL();
+    }
+    csProxy = Z_GEOS_OBJ_P(csZv);
+    if (csProxy->std.ce != CoordSeq_ce_ptr) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC, "GEOSGeometry::createLinearRing: expected GEOSCoordSeq");
+        RETURN_NULL();
+    }
+    cs = (GEOSCoordSequence*)csProxy->relay;
+    if (!cs) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createLinearRing: GEOSCoordSeq already consumed");
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createLinearRing_r(GEOS_G(handle), cs);
+    if (!g) RETURN_NULL();
+    setRelay(csZv, NULL);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+/* GEOSGeometry::createPolygon(shell, holes = []) — shell+holes ownership transfers */
+PHP_METHOD(Geometry, createPolygon)
+{
+    zval *shellZv;
+    zval *holesZv = NULL;
+    GEOSGeometry *shell;
+    GEOSGeometry **holes = NULL;
+    zval **holeZvs = NULL;
+    unsigned int nholes = 0, i;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o|a",
+            &shellZv, &holesZv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    shell = geomFromZvalForTransfer(shellZv,
+            "GEOSGeometry::createPolygon shell");
+    if (!shell) RETURN_NULL();
+
+    if (holesZv) {
+        holes = collectGeomsForTransfer(holesZv,
+                "GEOSGeometry::createPolygon hole",
+                &nholes, &holeZvs);
+        /* nholes==0 with NULL holes means an empty array, which is OK. */
+        if (nholes > 0 && !holes) {
+            /* exception thrown */
+            RETURN_NULL();
+        }
+    }
+
+    g = GEOSGeom_createPolygon_r(GEOS_G(handle), shell, holes, nholes);
+    if (!g) {
+        if (holes) efree(holes);
+        if (holeZvs) efree(holeZvs);
+        RETURN_NULL();
+    }
+
+    /* Ownership of shell + holes has transferred. Clear all input relays. */
+    setRelay(shellZv, NULL);
+    for (i = 0; i < nholes; ++i) setRelay(holeZvs[i], NULL);
+
+    if (holes) efree(holes);
+    if (holeZvs) efree(holeZvs);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyPolygon)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyPolygon_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createCollection)
+{
+    zend_long type;
+    zval *geomsZv;
+    GEOSGeometry **geoms = NULL;
+    zval **geomZvs = NULL;
+    unsigned int n = 0, i;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "la",
+            &type, &geomsZv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    /* Validate type up front. */
+    if (type != GEOS_MULTIPOINT && type != GEOS_MULTILINESTRING
+            && type != GEOS_MULTIPOLYGON && type != GEOS_GEOMETRYCOLLECTION
+            && type != GEOS_MULTICURVE && type != GEOS_MULTISURFACE) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createCollection: invalid type %ld "
+            "(expect GEOS_MULTIPOINT/MULTILINESTRING/MULTIPOLYGON/"
+            "GEOMETRYCOLLECTION/MULTICURVE/MULTISURFACE)", (long)type);
+        RETURN_NULL();
+    }
+
+    geoms = collectGeomsForTransfer(geomsZv,
+            "GEOSGeometry::createCollection", &n, &geomZvs);
+    if (n > 0 && !geoms) RETURN_NULL();
+
+    g = GEOSGeom_createCollection_r(GEOS_G(handle), (int)type, geoms, n);
+    if (!g) {
+        if (geoms) efree(geoms);
+        if (geomZvs) efree(geomZvs);
+        RETURN_NULL();
+    }
+
+    for (i = 0; i < n; ++i) setRelay(geomZvs[i], NULL);
+    if (geoms) efree(geoms);
+    if (geomZvs) efree(geomZvs);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyCollection)
+{
+    zend_long type;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l",
+            &type) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    if (type != GEOS_MULTIPOINT && type != GEOS_MULTILINESTRING
+            && type != GEOS_MULTIPOLYGON && type != GEOS_GEOMETRYCOLLECTION
+            && type != GEOS_MULTICURVE && type != GEOS_MULTISURFACE) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createEmptyCollection: invalid type %ld",
+            (long)type);
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createEmptyCollection_r(GEOS_G(handle), (int)type);
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createRectangle)
+{
+    double xmin, ymin, xmax, ymax;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "dddd",
+            &xmin, &ymin, &xmax, &ymax) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createRectangle_r(GEOS_G(handle), xmin, ymin, xmax, ymax);
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+/* -- Item 12 — curved geometry factory statics ------------ */
+
+PHP_METHOD(Geometry, createCircularString)
+{
+    zval *csZv;
+    Proxy *csProxy;
+    GEOSCoordSequence *cs;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o", &csZv) == FAILURE) {
+        RETURN_NULL();
+    }
+    csProxy = Z_GEOS_OBJ_P(csZv);
+    if (csProxy->std.ce != CoordSeq_ce_ptr) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createCircularString: expected GEOSCoordSeq");
+        RETURN_NULL();
+    }
+    cs = (GEOSCoordSequence*)csProxy->relay;
+    if (!cs) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSGeometry::createCircularString: GEOSCoordSeq already consumed");
+        RETURN_NULL();
+    }
+
+    g = GEOSGeom_createCircularString_r(GEOS_G(handle), cs);
+    if (!g) RETURN_NULL();
+    setRelay(csZv, NULL);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyCircularString)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyCircularString_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createCompoundCurve)
+{
+    zval *componentsZv;
+    GEOSGeometry **comps = NULL;
+    zval **compZvs = NULL;
+    unsigned int n = 0, i;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a",
+            &componentsZv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    comps = collectGeomsForTransfer(componentsZv,
+            "GEOSGeometry::createCompoundCurve", &n, &compZvs);
+    if (n > 0 && !comps) RETURN_NULL();
+
+    g = GEOSGeom_createCompoundCurve_r(GEOS_G(handle), comps, n);
+    if (!g) {
+        if (comps) efree(comps);
+        if (compZvs) efree(compZvs);
+        RETURN_NULL();
+    }
+
+    for (i = 0; i < n; ++i) setRelay(compZvs[i], NULL);
+    if (comps) efree(comps);
+    if (compZvs) efree(compZvs);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyCompoundCurve)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyCompoundCurve_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createCurvePolygon)
+{
+    zval *shellZv;
+    zval *holesZv = NULL;
+    GEOSGeometry *shell;
+    GEOSGeometry **holes = NULL;
+    zval **holeZvs = NULL;
+    unsigned int nholes = 0, i;
+    GEOSGeometry *g;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o|a",
+            &shellZv, &holesZv) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    shell = geomFromZvalForTransfer(shellZv,
+            "GEOSGeometry::createCurvePolygon shell");
+    if (!shell) RETURN_NULL();
+
+    if (holesZv) {
+        holes = collectGeomsForTransfer(holesZv,
+                "GEOSGeometry::createCurvePolygon hole",
+                &nholes, &holeZvs);
+        if (nholes > 0 && !holes) RETURN_NULL();
+    }
+
+    g = GEOSGeom_createCurvePolygon_r(GEOS_G(handle), shell, holes, nholes);
+    if (!g) {
+        if (holes) efree(holes);
+        if (holeZvs) efree(holeZvs);
+        RETURN_NULL();
+    }
+
+    setRelay(shellZv, NULL);
+    for (i = 0; i < nholes; ++i) setRelay(holeZvs[i], NULL);
+    if (holes) efree(holes);
+    if (holeZvs) efree(holeZvs);
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
+PHP_METHOD(Geometry, createEmptyCurvePolygon)
+{
+    GEOSGeometry *g = GEOSGeom_createEmptyCurvePolygon_r(GEOS_G(handle));
+    if (!g) RETURN_NULL();
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, g);
+}
+
 /* -- class GEOSCoordSeq -------------------- */
 
 /*
@@ -4733,6 +5335,227 @@ PHP_METHOD(WKBReader, setFixStructure)
 }
 
 
+/* -- class GEOSGeoJSONReader -------------------- */
+
+/*
+ * NOTE on input: GEOSGeoJSONReader_readGeometry_r is geometry-oriented but
+ * the underlying GEOS implementation is permissive:
+ *  - A bare geometry object ({"type":"Point",...}) returns that geometry.
+ *  - A "Feature" returns its inner geometry.
+ *  - A "FeatureCollection" returns a GeometryCollection of inner geometries
+ *    (this is GEOS-specific behaviour, not OGC GeoJSON semantics).
+ *  - Malformed JSON raises a ParseException via the GEOS error handler,
+ *    which the registered errorHandler propagates as a PHP exception.
+ *
+ * Documenting both: callers should treat the reader as "give me a geometry
+ * out of any GeoJSON document", not as a strict feature-property reader.
+ */
+
+PHP_METHOD(GeoJSONReader, __construct);
+PHP_METHOD(GeoJSONReader, read);
+
+static zend_function_entry GeoJSONReader_methods[] = {
+    PHP_ME(GeoJSONReader, __construct, arginfo_GeoJSONReader_construct, 0)
+    PHP_ME(GeoJSONReader, read, arginfo_GeoJSONReader_read, 0)
+    {NULL, NULL, NULL}
+};
+
+static zend_class_entry *GeoJSONReader_ce_ptr;
+static zend_object_handlers GeoJSONReader_object_handlers;
+
+static void
+GeoJSONReader_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
+{
+#if PHP_VERSION_ID < 70000
+    Proxy *obj = (Proxy *)object;
+#else
+    Proxy *obj = php_geos_fetch_object(object);
+#endif
+
+    GEOSGeoJSONReader *reader = (GEOSGeoJSONReader*)obj->relay;
+    if (reader) {
+        GEOSGeoJSONReader_destroy_r(GEOS_G(handle), reader);
+    }
+
+#if PHP_VERSION_ID < 70000
+    zend_hash_destroy(obj->std.properties);
+    FREE_HASHTABLE(obj->std.properties);
+
+    efree(obj);
+#endif
+}
+
+static zend_object_value
+GeoJSONReader_create_obj (zend_class_entry *type TSRMLS_DC)
+{
+    return Gen_create_obj(type, GeoJSONReader_dtor, &GeoJSONReader_object_handlers);
+}
+
+PHP_METHOD(GeoJSONReader, __construct)
+{
+    GEOSGeoJSONReader *obj;
+    zval *object = getThis();
+
+    obj = GEOSGeoJSONReader_create_r(GEOS_G(handle));
+    if ( ! obj ) {
+        php_error_docref(NULL TSRMLS_CC, E_ERROR,
+                "GEOSGeoJSONReader_create() failed (didn't initGEOS?)");
+    }
+
+    setRelay(object, obj);
+}
+
+PHP_METHOD(GeoJSONReader, read)
+{
+    GEOSGeoJSONReader *reader;
+    GEOSGeometry *geom;
+    zend_string *json;
+#if PHP_VERSION_ID < 70000
+    int jsonlen;
+#endif
+
+    reader = (GEOSGeoJSONReader*)getRelay(getThis(), GeoJSONReader_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,
+#if PHP_VERSION_ID >= 70000
+            "S", &json
+#else
+            "s", &json, &jsonlen
+#endif
+       ) == FAILURE)
+    {
+        RETURN_NULL();
+    }
+
+    geom = GEOSGeoJSONReader_readGeometry_r(GEOS_G(handle), reader, ZSTR_VAL(json));
+    /* On failure GEOS will have raised via the registered error handler,
+     * which throws a PHP exception. Either way, on NULL return we just
+     * propagate. */
+    if ( ! geom ) RETURN_NULL();
+
+    object_init_ex(return_value, Geometry_ce_ptr);
+    setRelay(return_value, geom);
+}
+
+/* -- class GEOSGeoJSONWriter -------------------- */
+
+PHP_METHOD(GeoJSONWriter, __construct);
+PHP_METHOD(GeoJSONWriter, write);
+PHP_METHOD(GeoJSONWriter, setOutputDimension);
+PHP_METHOD(GeoJSONWriter, getOutputDimension);
+
+static zend_function_entry GeoJSONWriter_methods[] = {
+    PHP_ME(GeoJSONWriter, __construct, arginfo_GeoJSONWriter_construct, 0)
+    PHP_ME(GeoJSONWriter, write, arginfo_GeoJSONWriter_write, 0)
+    PHP_ME(GeoJSONWriter, setOutputDimension, arginfo_GeoJSONWriter_setOutputDimension, 0)
+    PHP_ME(GeoJSONWriter, getOutputDimension, arginfo_GeoJSONWriter_getOutputDimension, 0)
+    {NULL, NULL, NULL}
+};
+
+static zend_class_entry *GeoJSONWriter_ce_ptr;
+static zend_object_handlers GeoJSONWriter_object_handlers;
+
+static void
+GeoJSONWriter_dtor (GEOS_PHP_DTOR_OBJECT *object TSRMLS_DC)
+{
+#if PHP_VERSION_ID < 70000
+    Proxy *obj = (Proxy *)object;
+#else
+    Proxy *obj = php_geos_fetch_object(object);
+#endif
+
+    GEOSGeoJSONWriter *writer = (GEOSGeoJSONWriter*)obj->relay;
+    if (writer) {
+        GEOSGeoJSONWriter_destroy_r(GEOS_G(handle), writer);
+    }
+
+#if PHP_VERSION_ID < 70000
+    zend_hash_destroy(obj->std.properties);
+    FREE_HASHTABLE(obj->std.properties);
+
+    efree(obj);
+#endif
+}
+
+static zend_object_value
+GeoJSONWriter_create_obj (zend_class_entry *type TSRMLS_DC)
+{
+    return Gen_create_obj(type, GeoJSONWriter_dtor, &GeoJSONWriter_object_handlers);
+}
+
+PHP_METHOD(GeoJSONWriter, __construct)
+{
+    GEOSGeoJSONWriter *obj;
+    zval *object = getThis();
+
+    obj = GEOSGeoJSONWriter_create_r(GEOS_G(handle));
+    if ( ! obj ) {
+        php_error_docref(NULL TSRMLS_CC, E_ERROR,
+                "GEOSGeoJSONWriter_create() failed (didn't initGEOS?)");
+    }
+
+    setRelay(object, obj);
+}
+
+/**
+ * string GEOSGeoJSONWriter::write(GEOSGeometry $g, int $indent = -1)
+ *
+ * indent == -1 (default) → compact output (no whitespace).
+ * indent >= 0           → pretty-print with the given indent width.
+ */
+PHP_METHOD(GeoJSONWriter, write)
+{
+    GEOSGeoJSONWriter *writer;
+    zval *zobj;
+    GEOSGeometry *geom;
+    zend_long indent = -1;
+    char *out;
+    char *retstr;
+
+    writer = (GEOSGeoJSONWriter*)getRelay(getThis(), GeoJSONWriter_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "o|l",
+            &zobj, &indent) == FAILURE) {
+        RETURN_NULL();
+    }
+    geom = getRelay(zobj, Geometry_ce_ptr);
+
+    out = GEOSGeoJSONWriter_writeGeometry_r(GEOS_G(handle), writer,
+            geom, (int)indent);
+    if ( ! out ) RETURN_NULL();
+
+    retstr = estrdup(out);
+    GEOSFree_r(GEOS_G(handle), out);
+
+    GEOS_PHP_RETURN_STRING(retstr);
+}
+
+PHP_METHOD(GeoJSONWriter, setOutputDimension)
+{
+    GEOSGeoJSONWriter *writer;
+    zend_long dim;
+
+    writer = (GEOSGeoJSONWriter*)getRelay(getThis(), GeoJSONWriter_ce_ptr);
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &dim) == FAILURE) {
+        RETURN_NULL();
+    }
+
+    GEOSGeoJSONWriter_setOutputDimension_r(GEOS_G(handle), writer, (int)dim);
+}
+
+PHP_METHOD(GeoJSONWriter, getOutputDimension)
+{
+    GEOSGeoJSONWriter *writer;
+    int ret;
+
+    writer = (GEOSGeoJSONWriter*)getRelay(getThis(), GeoJSONWriter_ce_ptr);
+
+    ret = GEOSGeoJSONWriter_getOutputDimension_r(GEOS_G(handle), writer);
+    RETURN_LONG(ret);
+}
+
+
 /* -- Free functions ------------------------- */
 
 /**
@@ -5165,6 +5988,30 @@ PHP_MINIT_FUNCTION(geos)
     CoordSeq_object_handlers.free_obj = CoordSeq_dtor;
 #endif
 
+    /* GeoJSONReader */
+    INIT_CLASS_ENTRY(ce, "GEOSGeoJSONReader", GeoJSONReader_methods);
+    GeoJSONReader_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
+    GeoJSONReader_ce_ptr->create_object = GeoJSONReader_create_obj;
+    memcpy(&GeoJSONReader_object_handlers,
+        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    GeoJSONReader_object_handlers.clone_obj = NULL;
+#if PHP_VERSION_ID >= 70000
+    GeoJSONReader_object_handlers.offset = XtOffsetOf(Proxy, std);
+    GeoJSONReader_object_handlers.free_obj = GeoJSONReader_dtor;
+#endif
+
+    /* GeoJSONWriter */
+    INIT_CLASS_ENTRY(ce, "GEOSGeoJSONWriter", GeoJSONWriter_methods);
+    GeoJSONWriter_ce_ptr = zend_register_internal_class(&ce TSRMLS_CC);
+    GeoJSONWriter_ce_ptr->create_object = GeoJSONWriter_create_obj;
+    memcpy(&GeoJSONWriter_object_handlers,
+        zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    GeoJSONWriter_object_handlers.clone_obj = NULL;
+#if PHP_VERSION_ID >= 70000
+    GeoJSONWriter_object_handlers.offset = XtOffsetOf(Proxy, std);
+    GeoJSONWriter_object_handlers.free_obj = GeoJSONWriter_dtor;
+#endif
+
 
     /* Constants */
     REGISTER_LONG_CONSTANT("GEOSBUF_CAP_ROUND",  GEOSBUF_CAP_ROUND,
@@ -5195,6 +6042,18 @@ PHP_MINIT_FUNCTION(geos)
     REGISTER_LONG_CONSTANT("GEOS_MULTIPOLYGON", GEOS_MULTIPOLYGON,
         CONST_CS|CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("GEOS_GEOMETRYCOLLECTION", GEOS_GEOMETRYCOLLECTION,
+        CONST_CS|CONST_PERSISTENT);
+
+    /* Item 12 — curved geometry type ids (from enum GEOSGeomTypes) */
+    REGISTER_LONG_CONSTANT("GEOS_CIRCULARSTRING", GEOS_CIRCULARSTRING,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_COMPOUNDCURVE", GEOS_COMPOUNDCURVE,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_CURVEPOLYGON", GEOS_CURVEPOLYGON,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_MULTICURVE", GEOS_MULTICURVE,
+        CONST_CS|CONST_PERSISTENT);
+    REGISTER_LONG_CONSTANT("GEOS_MULTISURFACE", GEOS_MULTISURFACE,
         CONST_CS|CONST_PERSISTENT);
 
     REGISTER_LONG_CONSTANT("GEOSVALID_ALLOW_SELFTOUCHING_RING_FORMING_HOLE",
