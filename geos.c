@@ -6681,9 +6681,13 @@ PHP_METHOD(STRtree, insert)
      * track the box. The cloned env ensures we can drive
      * GEOSSTRtree_nearest_generic_r's distance callback later — that API
      * receives the box pointer as the "item" and we need a geometry to
-     * compute distance to the probe. */
+     * compute distance to the probe.
+     *
+     * We pass box->env (our owned clone) — NOT the caller's env — to the
+     * tree, so that the tree's envelope reference remains valid even if
+     * the caller drops their PHP $env zval after the insert. */
     box = strtree_box_create(payloadz, env);
-    GEOSSTRtree_insert_r(GEOS_G(handle), r->tree, env, (void*)box);
+    GEOSSTRtree_insert_r(GEOS_G(handle), r->tree, box->env, (void*)box);
     strtree_box_track(r, box);
 }
 
@@ -6692,7 +6696,6 @@ PHP_METHOD(STRtree, remove)
     STRtreeRelay *r;
     zval *envz;
     zval *payloadz;
-    GEOSGeometry *env;
     STRtreeBox *box;
     char rc;
 
@@ -6703,7 +6706,17 @@ PHP_METHOD(STRtree, remove)
         RETURN_NULL();
     }
 
-    env = (GEOSGeometry*)getRelay(envz, Geometry_ce_ptr);
+    /* libgeos's STRtree is bulk-loaded: once query()/iterate()/nearest()
+     * triggers internal construction, the tree becomes read-only and any
+     * mutation (insert OR remove) hits undefined behaviour, segfaulting in
+     * practice. Match the build-once gate we already enforce on insert. */
+    if (r->built) {
+        zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+            1 TSRMLS_CC,
+            "GEOSSTRtree: cannot remove after the tree has been queried "
+            "(STRtree is build-once; create a fresh tree to mutate)");
+        RETURN_NULL();
+    }
 
     /* Find the tracked box that matches this payload. If none, nothing to
      * remove. (We don't even ask GEOS — without the right pointer it would
@@ -6713,7 +6726,10 @@ PHP_METHOD(STRtree, remove)
         RETURN_BOOL(0);
     }
 
-    rc = GEOSSTRtree_remove_r(GEOS_G(handle), r->tree, env, (void*)box);
+    /* Pass our owned clone (box->env) — same pointer we handed the tree at
+     * insert time — rather than the caller's $envz, which may be a
+     * semantically-equal but pointer-distinct geometry. */
+    rc = GEOSSTRtree_remove_r(GEOS_G(handle), r->tree, box->env, (void*)box);
     /* upstream: 1 = removed, 0 = not found, 2 = error. */
     if (rc == 1) {
         strtree_box_untrack(r, box);

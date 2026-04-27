@@ -1,3 +1,22 @@
+php-geos (1.1.2+git20260426-1~jammy1) jammy; urgency=medium
+
+  * Fix segfault in GEOSSTRtree::remove() when called after the tree
+    has been queried/iterated/nearest'd. libgeos's STRtree is bulk-loaded;
+    once internal construction triggers, mutation hits undefined behaviour.
+    The build-once gate that already protected insert() now also covers
+    remove(); a clean exception is raised instead of crashing.
+  * Fix latent dangling-reference hazard in GEOSSTRtree::insert(): the
+    tree previously stored the caller's GEOSGeometry* envelope pointer
+    directly. Dropping the caller's $env zval before the first query
+    could leave a stale reference inside the C tree. The binding now
+    stores its own cloned envelope (box->env) and uses it consistently
+    in both insert() and remove(), so caller-side env lifetime no
+    longer matters after insert returns.
+  * Two regression tests added in 030_STRtree.phpt:
+    testRemoveAfterNearestRejected, testInsertEnvLifetimeAfterCallerDrops.
+
+ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 20:00:00 +0200
+
 php-geos (1.1.1+git20260426-1~jammy1) jammy; urgency=medium
 
   * Fix getZvalAsDouble silently truncating fractional floats to integers.

@@ -251,6 +251,48 @@ class STRtreeTest extends GEOSTest
         }
     }
 
+    public function testRemoveAfterNearestRejected()
+    {
+        /* Regression: GEOSSTRtree_remove_r against a built tree was
+         * undefined behaviour and segfaulted in libgeos 3.14. The binding
+         * now extends the build-once gate to remove() too. */
+        $t = new GEOSSTRtree();
+        $envA = $this->box(0, 0, 1, 1);
+        $t->insert($envA, 'A');
+        $t->insert($this->box(2, 2, 3, 3), 'B');
+        $t->nearest($this->box(-1, -1, -1, -1));
+
+        try {
+            $t->remove($envA, 'A');
+            $this->assertTrue(false);
+        } catch (Exception $e) {
+            $this->assertContains('build-once', $e->getMessage());
+        }
+    }
+
+    public function testInsertEnvLifetimeAfterCallerDrops()
+    {
+        /* Regression: insert() previously stored the caller's GEOSGeometry*
+         * pointer in the tree. Dropping the caller's $env before query
+         * could leave a dangling reference. The binding now stores its own
+         * cloned env (box->env), so this is safe. */
+        $t = new GEOSSTRtree();
+
+        $envA = $this->box(0, 0, 1, 1);
+        $t->insert($envA, 'A');
+        unset($envA);
+        gc_collect_cycles();
+
+        $envB = $this->box(2, 2, 3, 3);
+        $t->insert($envB, 'B');
+        unset($envB);
+        gc_collect_cycles();
+
+        $hits = $t->query($this->box(-5, -5, 5, 5));
+        sort($hits);
+        $this->assertEquals(array('A', 'B'), $hits);
+    }
+
     public function testLifecycleObjectRefcount()
     {
         /* When the tree is destroyed, payload object refcounts must drop. */
@@ -311,5 +353,7 @@ STRtreeTest->testRemoveByObjectPayload_identitySemantic	OK
 STRtreeTest->testCallbackExceptionPropagates	OK
 STRtreeTest->testCallbackExceptionInIterate	OK
 STRtreeTest->testInsertAfterQueryRejected	OK
+STRtreeTest->testRemoveAfterNearestRejected	OK
+STRtreeTest->testInsertEnvLifetimeAfterCallerDrops	OK
 STRtreeTest->testLifecycleObjectRefcount	OK
 STRtreeTest->testRemoveDecrementsPayloadRefcount	OK
