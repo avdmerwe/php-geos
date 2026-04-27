@@ -1,3 +1,16 @@
+php-geos (1.1.1+git20260426-1~jammy1) jammy; urgency=medium
+
+  * Fix getZvalAsDouble silently truncating fractional floats to integers.
+    The function was declared to return long despite reading Z_DVAL; the
+    truncation was masked because all callers assigned the result to
+    double targets. Affected call sites: GEOSCoordSeq::copyFromArrays
+    (reported in the field), buffer style 'mitre_limit', and
+    coverageClean params 'snap_distance' / 'gap_max_width'.
+  * Add regression test
+    006_CoordSeq.phpt::testCopyFromArraysPreservesFractionalFloats.
+
+ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 19:00:00 +0200
+
 php-geos (1.1.0+git20260426-1~jammy1) jammy; urgency=medium
 
   * Major upstream extension: fork at github.com/avdmerwe/php-geos targeting

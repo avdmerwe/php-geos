@@ -179,6 +179,19 @@ class CoordSeqTest extends GEOSTest
         $this->assertFalse(isset($a['m']));
     }
 
+    public function testCopyFromArraysPreservesFractionalFloats()
+    {
+        /* Regression: getZvalAsDouble previously declared 'long' return type,
+         * silently truncating fractional values to integers before assignment
+         * to a double target. */
+        $cs = new GEOSCoordSeq(2);
+        $cs->copyFromArrays(array(1.5, 2.7), array(3.1, 4.9));
+        $this->assertEquals(1.5, $cs->getX(0));
+        $this->assertEquals(2.7, $cs->getX(1));
+        $this->assertEquals(3.1, $cs->getY(0));
+        $this->assertEquals(4.9, $cs->getY(1));
+    }
+
     public function testCopyFromArrays3D()
     {
         $cs = new GEOSCoordSeq(3, 3);
@@ -384,6 +397,7 @@ CoordSeqTest->testSetMOnNonMThrows	OK
 CoordSeqTest->testGetMOnNonMThrows	OK
 CoordSeqTest->testGetXYZOn2DThrows	OK
 CoordSeqTest->testCopyFromArrays2D	OK
+CoordSeqTest->testCopyFromArraysPreservesFractionalFloats	OK
 CoordSeqTest->testCopyFromArrays3D	OK
 CoordSeqTest->testCopyFromArrays2DM	OK
 CoordSeqTest->testCopyFromArrays3DM	OK

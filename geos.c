@@ -238,7 +238,7 @@ static long getZvalAsLong(GEOS_PHP_ZVAL val)
     return ret;
 }
 
-static long getZvalAsDouble(GEOS_PHP_ZVAL val)
+static double getZvalAsDouble(GEOS_PHP_ZVAL val)
 {
     double ret;
     zval tmp;
