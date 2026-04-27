@@ -153,6 +153,133 @@ class STRtreeTest extends GEOSTest
         $this->assertNull($r);
     }
 
+    public function testKNearestReturnsArray()
+    {
+        $t = new GEOSSTRtree();
+        $t->insert(GEOSGeometry::createPointFromXY(1, 1), 'A');
+        $t->insert(GEOSGeometry::createPointFromXY(5, 5), 'B');
+        $t->insert(GEOSGeometry::createPointFromXY(2, 2), 'C');
+        $t->insert(GEOSGeometry::createPointFromXY(10, 10), 'D');
+        $t->insert(GEOSGeometry::createPointFromXY(3, 3), 'E');
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+
+        $r = $t->nearest($probe, 3);
+        $this->assertEquals(array('A', 'C', 'E'), $r);
+    }
+
+    public function testKNearestKEqualsOneReturnsSingletonArray()
+    {
+        $t = new GEOSSTRtree();
+        $t->insert(GEOSGeometry::createPointFromXY(1, 1), 'A');
+        $t->insert(GEOSGeometry::createPointFromXY(5, 5), 'B');
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+
+        $r = $t->nearest($probe, 1);
+        $this->assertEquals(array('A'), $r);
+    }
+
+    public function testKNearestKLargerThanTreeReturnsAllSorted()
+    {
+        $t = new GEOSSTRtree();
+        $t->insert(GEOSGeometry::createPointFromXY(5, 5), 'B');
+        $t->insert(GEOSGeometry::createPointFromXY(1, 1), 'A');
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+
+        $r = $t->nearest($probe, 99);
+        $this->assertEquals(array('A', 'B'), $r);
+    }
+
+    public function testKNearestEmptyTreeReturnsEmptyArray()
+    {
+        $t = new GEOSSTRtree();
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+        $r = $t->nearest($probe, 3);
+        $this->assertEquals(array(), $r);
+    }
+
+    public function testKNearestZeroThrows()
+    {
+        $t = new GEOSSTRtree();
+        $t->insert(GEOSGeometry::createPointFromXY(1, 1), 'A');
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+        try {
+            $t->nearest($probe, 0);
+            $this->assertTrue(false);
+        } catch (Exception $e) {
+            $this->assertContains('>= 1', $e->getMessage());
+        }
+    }
+
+    public function testKNearestNegativeThrows()
+    {
+        $t = new GEOSSTRtree();
+        $t->insert(GEOSGeometry::createPointFromXY(1, 1), 'A');
+        $probe = GEOSGeometry::createPointFromXY(0, 0);
+        try {
+            $t->nearest($probe, -1);
+            $this->assertTrue(false);
+        } catch (Exception $e) {
+            $this->assertContains('>= 1', $e->getMessage());
+        }
+    }
+
+    public function testIterateEarlyTermination()
+    {
+        /* The user callback returning strict false signals "stop calling
+         * me". GEOS's internal walk still completes, but the user's
+         * callback is not invoked again. */
+        $t = new GEOSSTRtree();
+        for ($i = 0; $i < 5; $i++) {
+            $t->insert(GEOSGeometry::createPointFromXY($i, 0), "p$i");
+        }
+        $called = array();
+        $t->iterate(function ($p) use (&$called) {
+            $called[] = $p;
+            if (count($called) >= 2) {
+                return false;
+            }
+        });
+        $this->assertEquals(2, count($called));
+    }
+
+    public function testQueryCallbackEarlyTermination()
+    {
+        $t = new GEOSSTRtree();
+        for ($i = 0; $i < 5; $i++) {
+            $t->insert(GEOSGeometry::createPointFromXY($i, 0), "p$i");
+        }
+        $envBig = $this->reader()->read('POLYGON((-1 -1, 100 -1, 100 1, -1 1, -1 -1))');
+
+        $called = array();
+        $t->query($envBig, function ($p) use (&$called) {
+            $called[] = $p;
+            return false;
+        });
+        $this->assertEquals(1, count($called));
+    }
+
+    public function testCallbackTrueOrNullDoesNotStop()
+    {
+        /* Only strict boolean false stops. Returning true or null
+         * (implicit) continues iteration over all items. */
+        $t = new GEOSSTRtree();
+        for ($i = 0; $i < 4; $i++) {
+            $t->insert(GEOSGeometry::createPointFromXY($i, 0), "p$i");
+        }
+        $envBig = $this->reader()->read('POLYGON((-1 -1, 100 -1, 100 1, -1 1, -1 -1))');
+
+        $countNull = 0;
+        $t->query($envBig, function () use (&$countNull) { $countNull++; });
+        $this->assertEquals(4, $countNull);
+
+        $countTrue = 0;
+        $t->query($envBig, function () use (&$countTrue) {
+            $countTrue++;
+            return true;
+        });
+        $this->assertEquals(4, $countTrue);
+    }
+
     public function testRemoveByIntPayload()
     {
         $t = new GEOSSTRtree();
@@ -348,6 +475,15 @@ STRtreeTest->testMixedTypePayloads	OK
 STRtreeTest->testIterate	OK
 STRtreeTest->testNearest	OK
 STRtreeTest->testNearestEmptyTreeReturnsNull	OK
+STRtreeTest->testKNearestReturnsArray	OK
+STRtreeTest->testKNearestKEqualsOneReturnsSingletonArray	OK
+STRtreeTest->testKNearestKLargerThanTreeReturnsAllSorted	OK
+STRtreeTest->testKNearestEmptyTreeReturnsEmptyArray	OK
+STRtreeTest->testKNearestZeroThrows	OK
+STRtreeTest->testKNearestNegativeThrows	OK
+STRtreeTest->testIterateEarlyTermination	OK
+STRtreeTest->testQueryCallbackEarlyTermination	OK
+STRtreeTest->testCallbackTrueOrNullDoesNotStop	OK
 STRtreeTest->testRemoveByIntPayload	OK
 STRtreeTest->testRemoveByObjectPayload_identitySemantic	OK
 STRtreeTest->testCallbackExceptionPropagates	OK

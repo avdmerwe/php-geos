@@ -6445,6 +6445,13 @@ typedef struct {
      * into 'exception' and short-circuit subsequent invocations. */
     zval exception;
     int has_exception;
+
+    /* Early-termination: if the user callback returns boolean false, we
+     * stop calling it for subsequent items. GEOSSTRtree_query_r /
+     * iterate_r will still walk the rest of the tree internally — there
+     * is no public way to abort C-side iteration — but no further userland
+     * work runs. */
+    int should_stop;
 } STRtreeCallbackCtx;
 
 static void
@@ -6468,9 +6475,11 @@ STRtree_trampoline(void *item, void *userdata)
     STRtreeBox *box = (STRtreeBox*)item;
     zval retval;
 
-    /* Sticky-error: if a previous invocation's callback threw, do nothing.
-     * GEOS will keep calling us until iteration completes; we just no-op. */
-    if (ctx->has_exception) return;
+    /* Sticky-error or early-stop: if a previous invocation's callback threw
+     * or asked to stop (returned false), do nothing for the rest of the
+     * traversal. GEOS will keep calling us until iteration completes; we
+     * just no-op. */
+    if (ctx->has_exception || ctx->should_stop) return;
 
     /* Defensive: a NULL item should never happen if the caller used the
      * insert() path. But if it does, treat as no-op rather than crash. */
@@ -6514,6 +6523,12 @@ STRtree_trampoline(void *item, void *userdata)
         ZVAL_UNDEF(&retval);
 
         if (zend_call_function(&fci, &fcc) == SUCCESS) {
+            /* Early-termination convention: a strict boolean false return
+             * from the user's callback signals "stop calling me". Other
+             * return values (null/void, true, anything else) are ignored. */
+            if (Z_TYPE(retval) == IS_FALSE) {
+                ctx->should_stop = 1;
+            }
             zval_ptr_dtor(&retval);
         }
         zval_ptr_dtor(&params[0]);
@@ -6844,7 +6859,103 @@ PHP_METHOD(STRtree, iterate)
     (void)strtree_propagate_exception(&ctx);
 }
 
-/* Distance callback for GEOSSTRtree_nearest_generic_r.
+/* -- k-nearest neighbour support -----------------------------
+ *
+ * libgeos's public C API exposes only single-nearest (k=1) via
+ * GEOSSTRtree_nearest_r / nearest_generic_r. There is no upstream
+ * k-nearest API, and the STRtree's internal best-first traversal is not
+ * reachable from outside the library.
+ *
+ * We implement k-NN by traversing every leaf of the (built) tree via
+ * GEOSSTRtree_iterate_r and maintaining a max-heap of size k keyed on
+ * distance from the probe geometry. After traversal we sort the heap
+ * ascending and return the payloads.
+ *
+ *   Time:   O(n log k)  (n leaves visited, each heap op O(log k))
+ *   Space:  O(k)        (the heap)
+ *
+ * This is not index-aware pruning — every leaf's distance is computed —
+ * so it is slower than a proper R-tree best-first walk would be on huge
+ * trees with small k. For typical workloads (n in thousands, k single-
+ * digit) the difference is unobservable. If/when libgeos exposes a
+ * k-nearest API, swap this for a direct call. */
+typedef struct {
+    double dist;
+    const STRtreeBox *box;
+} STRtreeKnnEntry;
+
+typedef struct {
+    GEOSGeometry *probe;        /* not owned */
+    int k;                       /* heap capacity */
+    int count;                   /* current heap occupancy */
+    STRtreeKnnEntry *heap;       /* size k, max-heap on .dist */
+    int has_geos_error;          /* GEOSDistance_r returned 0 */
+} STRtreeKnnCtx;
+
+static void
+strtree_knn_sift_up(STRtreeKnnEntry *h, int i)
+{
+    while (i > 0) {
+        int p = (i - 1) / 2;
+        if (h[p].dist >= h[i].dist) break;
+        STRtreeKnnEntry t = h[p]; h[p] = h[i]; h[i] = t;
+        i = p;
+    }
+}
+
+static void
+strtree_knn_sift_down(STRtreeKnnEntry *h, int n, int i)
+{
+    for (;;) {
+        int l = 2 * i + 1, r = 2 * i + 2, m = i;
+        if (l < n && h[l].dist > h[m].dist) m = l;
+        if (r < n && h[r].dist > h[m].dist) m = r;
+        if (m == i) break;
+        {
+            STRtreeKnnEntry t = h[m]; h[m] = h[i]; h[i] = t;
+        }
+        i = m;
+    }
+}
+
+static int
+strtree_knn_cmp_asc(const void *a, const void *b)
+{
+    double da = ((const STRtreeKnnEntry*)a)->dist;
+    double db = ((const STRtreeKnnEntry*)b)->dist;
+    if (da < db) return -1;
+    if (da > db) return 1;
+    return 0;
+}
+
+static void
+STRtree_knn_trampoline(void *item, void *userdata)
+{
+    STRtreeKnnCtx *ctx = (STRtreeKnnCtx*)userdata;
+    const STRtreeBox *box = (const STRtreeBox*)item;
+    double d;
+
+    if (ctx->has_geos_error) return;
+    if ( ! box || ! box->env) return;
+
+    if ( ! GEOSDistance_r(GEOS_G(handle), ctx->probe, box->env, &d)) {
+        ctx->has_geos_error = 1;
+        return;
+    }
+
+    if (ctx->count < ctx->k) {
+        ctx->heap[ctx->count].dist = d;
+        ctx->heap[ctx->count].box = box;
+        ctx->count++;
+        strtree_knn_sift_up(ctx->heap, ctx->count - 1);
+    } else if (d < ctx->heap[0].dist) {
+        ctx->heap[0].dist = d;
+        ctx->heap[0].box = box;
+        strtree_knn_sift_down(ctx->heap, ctx->count, 0);
+    }
+}
+
+/* Distance callback for GEOSSTRtree_nearest_generic_r (single-nearest path).
  *
  * The C API hands the callback two `void*` "items" — one of these is the
  * probe item we passed to nearest_generic_r, the other is a stored
@@ -6878,45 +6989,106 @@ PHP_METHOD(STRtree, nearest)
 {
     STRtreeRelay *r;
     zval *gz;
+    zval *kz = NULL;
     GEOSGeometry *g;
-    const void *itemPtr;
-    STRtreeNearestProbe probe;
 
     r = (STRtreeRelay*)getRelay(getThis(), STRtree_ce_ptr);
 
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "O",
-            &gz, Geometry_ce_ptr) == FAILURE) {
+    /* Signature: nearest(GEOSGeometry $g, ?int $k = null)
+     *   $k === null -> scalar single-nearest payload (or NULL on empty tree)
+     *   $k >= 1     -> array of up to $k nearest payloads, nearest first
+     *   $k <= 0     -> throws */
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "O|z!",
+            &gz, Geometry_ce_ptr, &kz) == FAILURE) {
         RETURN_NULL();
     }
     g = (GEOSGeometry*)getRelay(gz, Geometry_ce_ptr);
 
-    /* Empty tree: nearest_generic_r returns NULL. Short-circuit and don't
-     * even build. */
-    if (zend_hash_num_elements(r->boxes) == 0) {
-        RETURN_NULL();
+    /* ---- Single-nearest path (BC). ---- */
+    if (kz == NULL || Z_TYPE_P(kz) == IS_NULL) {
+        const void *itemPtr;
+        STRtreeNearestProbe probe;
+
+        if (zend_hash_num_elements(r->boxes) == 0) {
+            RETURN_NULL();
+        }
+
+        r->built = 1;
+        probe.env = g;
+        itemPtr = GEOSSTRtree_nearest_generic_r(GEOS_G(handle), r->tree,
+                (const void*)&probe, g,
+                STRtree_nearest_distance, (void*)&probe);
+
+        if ( ! itemPtr) {
+            RETURN_NULL();
+        }
+        {
+            const STRtreeBox *box = (const STRtreeBox*)itemPtr;
+            ZVAL_COPY(return_value, &box->payload);
+        }
+        return;
     }
 
-    /* Build-once trigger. */
-    r->built = 1;
-
-    /* GEOSSTRtree_nearest_r requires items to be GEOSGeometry* — that is
-     * NOT what we store. We must use nearest_generic_r with a custom
-     * distance callback. The probe is the user's geometry; we wrap it in
-     * a small struct so the distance callback can recognise it (it is
-     * passed in as the "item" alongside the user's data). */
-    probe.env = g;
-
-    itemPtr = GEOSSTRtree_nearest_generic_r(GEOS_G(handle), r->tree,
-            (const void*)&probe, g,
-            STRtree_nearest_distance, (void*)&probe);
-
-    if ( ! itemPtr) {
-        RETURN_NULL();
-    }
-
+    /* ---- k-nearest path. ---- */
     {
-        const STRtreeBox *box = (const STRtreeBox*)itemPtr;
-        ZVAL_COPY(return_value, &box->payload);
+        zend_long k_long;
+        int k, want, n, i;
+        STRtreeKnnCtx ctx;
+
+        if (Z_TYPE_P(kz) != IS_LONG) {
+            convert_to_long(kz);
+        }
+        k_long = Z_LVAL_P(kz);
+        if (k_long < 1) {
+            zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                1 TSRMLS_CC,
+                "GEOSSTRtree::nearest: $k must be >= 1 (got " ZEND_LONG_FMT ")",
+                k_long);
+            RETURN_NULL();
+        }
+        if (k_long > INT_MAX) k_long = INT_MAX;
+        k = (int)k_long;
+
+        n = zend_hash_num_elements(r->boxes);
+        array_init(return_value);
+        if (n == 0) {
+            return; /* empty tree -> [] */
+        }
+
+        /* Cap heap capacity at the number of items we actually have, so we
+         * don't allocate more than necessary. */
+        want = (k > n) ? n : k;
+
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.probe = g;
+        ctx.k = want;
+        ctx.heap = (STRtreeKnnEntry*)emalloc(sizeof(STRtreeKnnEntry) * want);
+
+        r->built = 1;
+        GEOSSTRtree_iterate_r(GEOS_G(handle), r->tree,
+                STRtree_knn_trampoline, &ctx);
+
+        if (ctx.has_geos_error) {
+            efree(ctx.heap);
+            zval_ptr_dtor(return_value);
+            ZVAL_UNDEF(return_value);
+            if ( ! EG(exception)) {
+                zend_throw_exception_ex(zend_exception_get_default(TSRMLS_C),
+                    1 TSRMLS_CC,
+                    "GEOSSTRtree::nearest: distance computation failed");
+            }
+            RETURN_NULL();
+        }
+
+        /* Sort the heap ascending by distance and append payloads. */
+        qsort(ctx.heap, ctx.count, sizeof(STRtreeKnnEntry),
+                strtree_knn_cmp_asc);
+        for (i = 0; i < ctx.count; i++) {
+            zval tmp;
+            ZVAL_COPY(&tmp, &ctx.heap[i].box->payload);
+            add_next_index_zval(return_value, &tmp);
+        }
+        efree(ctx.heap);
     }
 }
 

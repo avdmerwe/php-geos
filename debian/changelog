@@ -1,3 +1,32 @@
+php-geos (1.2.0+git20260426-1~jammy1) jammy; urgency=medium
+
+  * GEOSSTRtree::nearest gains optional second argument
+    nearest(GEOSGeometry $g, ?int $k = null) :
+      - $k === null  -> scalar single-nearest payload (or null on empty tree),
+                        unchanged from 1.1.x.
+      - $k >= 1      -> array of up to $k payloads sorted nearest-first.
+      - $k <= 0      -> throws.
+    Implemented as a max-heap-of-k traversal via GEOSSTRtree_iterate_r:
+    O(n log k) time, O(k) space, public-API only. Not index-aware
+    pruning (libgeos's STRtree internals are not exposed by the public
+    C API), but fast enough for typical workloads (n in thousands,
+    k single-digit) and strictly faster than the PHP-side
+    bbox-expand+sort fallback. If/when libgeos exposes a true
+    k-nearest API, swap for a direct call.
+
+  * GEOSSTRtree::query and ::iterate callbacks gain early-termination:
+    a strict boolean false return signals "stop calling me". GEOS's
+    internal C-side traversal still completes (no public way to abort
+    mid-iteration), but the user's callback is not invoked for
+    subsequent items. Returning null/void or true continues iteration
+    as before — strict false is the only sentinel.
+
+  * Tests: 9 new sub-cases in 030_STRtree.phpt covering k-NN happy
+    paths, k>n cap, empty-tree, $k <= 0 throws, plus iterate / query
+    early-termination + the negative case (true/null does not stop).
+
+ -- Abraham van der Merwe <abz@frogfoot.com>  Sun, 26 Apr 2026 21:00:00 +0200
+
 php-geos (1.1.2+git20260426-1~jammy1) jammy; urgency=medium
 
   * Fix segfault in GEOSSTRtree::remove() when called after the tree

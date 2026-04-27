@@ -611,7 +611,10 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_iterate, 0, 0, 1)
     ZEND_ARG_INFO(0, cb)
 ZEND_END_ARG_INFO()
 
-#define arginfo_STRtree_nearest                  arginfo_geom
+ZEND_BEGIN_ARG_INFO_EX(arginfo_STRtree_nearest, 0, 0, 1)
+    ZEND_ARG_INFO(0, geom)
+    ZEND_ARG_INFO(0, k)
+ZEND_END_ARG_INFO()
 
 
 /* -- Item 18: PreparedGeometry ------------------- */
